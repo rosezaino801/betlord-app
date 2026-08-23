@@ -1,5 +1,5 @@
 
-const API_URL = "PASTE_YOUR_BETLORD_API_URL_HERE";
+const API_URL = "https://api.the-odds-api.com";
 
 const HTML = `
 <!DOCTYPE html>
