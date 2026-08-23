@@ -1,4 +1,3 @@
-
 const API_URL = "https://api.the-odds-api.com";
 
 const HTML = `
@@ -50,7 +49,10 @@ nav button{
   background:#142338;
   color:white;
 }
-nav button.active{background:#19d37e;color:#06120c}
+nav button.active{
+  background:#19d37e;
+  color:#06120c;
+}
 main{padding:15px}
 .hero{
   background:linear-gradient(135deg,#10283c,#0b1728);
@@ -89,7 +91,11 @@ main{padding:15px}
   font-size:12px;
   margin-bottom:5px;
 }
-.loading{text-align:center;padding:30px;color:#9db0c5}
+.loading{
+  text-align:center;
+  padding:30px;
+  color:#9db0c5;
+}
 .error{
   background:#351820;
   color:#ff9ca8;
@@ -159,49 +165,55 @@ async function loadGames(){
       return;
     }
 
-    container.innerHTML = games.map(game => {
+    container.innerHTML = games.map(function(game){
 
       const totalMarket =
-        game.bookmakers?.[0]?.markets?.find(m => m.key === "totals");
+        game.bookmakers &&
+        game.bookmakers[0] &&
+        game.bookmakers[0].markets &&
+        game.bookmakers[0].markets.find(function(m){
+          return m.key === "totals";
+        });
 
       let oddsHTML = "";
 
       if(totalMarket && totalMarket.outcomes){
 
-        oddsHTML = totalMarket.outcomes.map(o => `
-          <div class="odd">
-            <span>${o.name}</span>
-            ${o.point ?? ""} @ ${o.price ?? ""}
-          </div>
-        `).join("");
+        oddsHTML = totalMarket.outcomes.map(function(o){
+
+          return '<div class="odd">' +
+            '<span>' + (o.name || "") + '</span>' +
+            (o.point ?? "") +
+            ' @ ' +
+            (o.price ?? "") +
+            '</div>';
+
+        }).join("");
 
       }
 
-      return `
-        <div class="game">
+      return '<div class="game">' +
 
-          <div class="teams">
-            <div>${game.away_team || "Away"}</div>
-            <div>VS</div>
-            <div>${game.home_team || "Home"}</div>
-          </div>
+        '<div class="teams">' +
+          '<div>' + (game.away_team || "Away") + '</div>' +
+          '<div>VS</div>' +
+          '<div>' + (game.home_team || "Home") + '</div>' +
+        '</div>' +
 
-          <div class="odds">
-            ${oddsHTML || '<div class="odd">Odds unavailable</div>'}
-          </div>
+        '<div class="odds">' +
+          (oddsHTML || '<div class="odd">Odds unavailable</div>') +
+        '</div>' +
 
-        </div>
-      `;
+      '</div>';
 
     }).join("");
 
   }catch(error){
 
-    container.innerHTML = `
-      <div class="error">
-        Unable to load odds right now.
-      </div>
-    `;
+    container.innerHTML =
+      '<div class="error">' +
+        'Unable to load odds right now.' +
+      '</div>';
 
     console.error(error);
   }
@@ -222,11 +234,13 @@ export default {
     if (url.pathname === "/api/odds") {
 
       const apiUrl =
-        `${API_URL}/v4/sports/upcoming/odds` +
-        `?regions=uk,eu,us,au` +
-        `&markets=h2h,spreads,totals` +
-        `&oddsFormat=decimal` +
-        `&apiKey=${encodeURIComponent(env.BETLORD_API_KEY)}`;
+        API_URL +
+        "/v4/sports/upcoming/odds" +
+        "?regions=uk,eu,us,au" +
+        "&markets=h2h,spreads,totals" +
+        "&oddsFormat=decimal" +
+        "&apiKey=" +
+        encodeURIComponent(env.BETLORD_API_KEY || "");
 
       const response = await fetch(apiUrl);
 
