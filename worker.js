@@ -221,7 +221,14 @@ export default {
 
     if (url.pathname === "/api/odds") {
 
-      const response = await fetch(env.BETLORD_API_URL);
+      const apiUrl =
+        `${API_URL}/v4/sports/upcoming/odds` +
+        `?regions=uk,eu,us,au` +
+        `&markets=h2h,spreads,totals` +
+        `&oddsFormat=decimal` +
+        `&apiKey=${encodeURIComponent(env.BETLORD_API_KEY)}`;
+
+      const response = await fetch(apiUrl);
 
       return new Response(await response.text(), {
         status: response.status,
