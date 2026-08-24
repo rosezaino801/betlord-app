@@ -1,14 +1,52 @@
 const API_URL = "https://api.the-odds-api.com";
 
+/*
+===========================================================
+ BETLORD — SMARTER BASKETBALL PREDICTION ENGINE
+===========================================================
+
+What this version does:
+
+1. Automatically discovers active basketball leagues.
+2. Fetches today's basketball games.
+3. Checks totals across ALL bookmakers returned.
+4. Finds the strongest consensus total line.
+5. Removes bookmaker margin (vig) when calculating probability.
+6. Measures:
+   - bookmaker agreement
+   - price edge
+   - line stability
+   - market strength
+7. Produces:
+   - BET OVER
+   - BET UNDER
+   - NO BET
+8. Never forces a prediction when the market is too close.
+9. Uses Africa/Lagos as the display timezone.
+10. Keeps BETLORD_API_KEY private inside Cloudflare Worker.
+
+IMPORTANT:
+This is a market-analysis engine, not a guarantee of results.
+===========================================================
+*/
+
 const HTML = `
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
+
+<meta
+  name="viewport"
+  content="width=device-width,initial-scale=1.0"
+>
+
 <title>BetLord</title>
 
 <style>
+
 *{
   box-sizing:border-box;
 }
@@ -30,24 +68,26 @@ header{
 }
 
 .logo{
-  width:48px;
-  height:48px;
-  border-radius:14px;
+  width:56px;
+  height:56px;
+  border-radius:15px;
   background:#19d37e;
   display:flex;
   align-items:center;
   justify-content:center;
-  font-size:27px;
+  font-size:30px;
   font-weight:bold;
+  color:#06120c;
 }
 
 h1{
   margin:0;
-  font-size:23px;
+  font-size:25px;
 }
 
 header small{
   color:#9db0c5;
+  font-size:14px;
 }
 
 nav{
@@ -55,16 +95,23 @@ nav{
   gap:10px;
   padding:15px;
   overflow-x:auto;
+  background:#07111f;
+  scrollbar-width:none;
+}
+
+nav::-webkit-scrollbar{
+  display:none;
 }
 
 nav button{
   border:0;
-  border-radius:12px;
-  padding:13px 18px;
+  border-radius:14px;
+  padding:15px 22px;
   background:#142338;
   color:white;
   white-space:nowrap;
   font-size:16px;
+  cursor:pointer;
 }
 
 nav button.active{
@@ -74,42 +121,54 @@ nav button.active{
 
 main{
   padding:15px;
+  max-width:900px;
+  margin:auto;
 }
 
 .hero{
-  background:linear-gradient(135deg,#10283c,#0b1728);
+  background:linear-gradient(
+    135deg,
+    #10283c,
+    #0b1728
+  );
   border-radius:20px;
-  padding:22px;
+  padding:24px;
   margin-bottom:18px;
 }
 
 .hero h2{
   margin-top:0;
-  font-size:28px;
+  font-size:30px;
 }
 
 .hero p{
   color:#b4c3d4;
   line-height:1.5;
+  font-size:17px;
 }
 
 .refresh{
   width:100%;
   border:0;
-  border-radius:12px;
-  padding:15px;
+  border-radius:14px;
+  padding:16px;
   background:#19d37e;
   color:#06120c;
   font-weight:bold;
-  font-size:16px;
+  font-size:17px;
   margin-bottom:15px;
+  cursor:pointer;
+}
+
+.refresh:active{
+  transform:scale(.99);
 }
 
 .status{
   background:#102238;
   border:1px solid #1b2b40;
-  padding:14px;
-  border-radius:12px;
+  padding:15px;
+  border-radius:14px;
   margin-bottom:15px;
   color:#9db0c5;
   line-height:1.4;
@@ -118,14 +177,14 @@ main{
 .game{
   background:#0d1b2c;
   border:1px solid #1b2b40;
-  border-radius:18px;
-  padding:17px;
-  margin-bottom:14px;
+  border-radius:20px;
+  padding:18px;
+  margin-bottom:15px;
 }
 
 .league{
   color:#19d37e;
-  font-size:12px;
+  font-size:13px;
   font-weight:bold;
   margin-bottom:12px;
   text-transform:uppercase;
@@ -137,21 +196,23 @@ main{
   align-items:center;
   gap:12px;
   font-weight:bold;
-  font-size:17px;
+  font-size:18px;
 }
 
 .team{
   flex:1;
+  line-height:1.3;
 }
 
 .vs{
   color:#718399;
   font-size:13px;
+  flex-shrink:0;
 }
 
 .time{
   color:#718399;
-  font-size:12px;
+  font-size:13px;
   margin-top:9px;
 }
 
@@ -159,13 +220,13 @@ main{
   display:grid;
   grid-template-columns:repeat(2,1fr);
   gap:9px;
-  margin-top:15px;
+  margin-top:16px;
 }
 
 .odd{
   background:#15263a;
-  padding:13px;
-  border-radius:11px;
+  padding:14px;
+  border-radius:12px;
 }
 
 .odd span{
@@ -173,12 +234,17 @@ main{
   color:#9db0c5;
   font-size:12px;
   margin-bottom:6px;
+  font-weight:bold;
+}
+
+.odd-value{
+  font-size:17px;
 }
 
 .prediction{
   margin-top:15px;
   padding:16px;
-  border-radius:14px;
+  border-radius:15px;
 }
 
 .prediction.bet{
@@ -188,53 +254,86 @@ main{
 
 .prediction.no-bet{
   background:#18283a;
-  border:1px solid #34465b;
+  border:1px solid #344b63;
 }
 
 .prediction-title{
+  color:#19d37e;
   font-size:13px;
   font-weight:bold;
   text-transform:uppercase;
   margin-bottom:8px;
 }
 
-.bet .prediction-title{
-  color:#19d37e;
-}
-
-.no-bet .prediction-title{
-  color:#ffd45c;
+.no-bet-title{
+  color:#ffd35a;
+  font-size:13px;
+  font-weight:bold;
+  text-transform:uppercase;
+  margin-bottom:8px;
 }
 
 .pick{
-  font-size:22px;
+  font-size:25px;
   font-weight:bold;
+  line-height:1.2;
 }
 
-.no-bet .pick{
-  color:#ffd45c;
+.no-bet-pick{
+  color:#ffd35a;
+  font-size:25px;
+  font-weight:bold;
 }
 
 .confidence{
   margin-top:7px;
   color:#a9c8b9;
-  font-size:13px;
+  font-size:14px;
 }
 
-.no-bet .confidence{
-  color:#a9b8c8;
+.reason{
+  margin-top:9px;
+  color:#aab9c8;
+  font-size:13px;
+  line-height:1.5;
 }
 
 .note{
-  margin-top:9px;
+  margin-top:10px;
   color:#8296aa;
   font-size:11px;
   line-height:1.5;
 }
 
+.metrics{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:7px;
+  margin-top:12px;
+}
+
+.metric{
+  background:#0b1a2b;
+  border-radius:10px;
+  padding:9px;
+  text-align:center;
+}
+
+.metric-label{
+  display:block;
+  color:#718399;
+  font-size:10px;
+  margin-bottom:4px;
+}
+
+.metric-value{
+  font-size:13px;
+  font-weight:bold;
+}
+
 .loading{
   text-align:center;
-  padding:35px;
+  padding:40px 20px;
   color:#9db0c5;
 }
 
@@ -242,37 +341,56 @@ main{
   background:#351820;
   color:#ff9ca8;
   padding:16px;
-  border-radius:12px;
+  border-radius:14px;
   line-height:1.5;
 }
 
-.no-pick{
-  grid-column:1 / -1;
-  padding:13px;
-  border-radius:10px;
-  background:#18283a;
+.empty{
+  background:#102238;
   color:#9db0c5;
+  padding:25px;
+  border-radius:15px;
+  text-align:center;
 }
 
 footer{
   text-align:center;
   color:#718399;
-  padding:30px 15px;
-  line-height:1.5;
+  padding:35px 15px;
+  line-height:1.6;
+  font-size:12px;
 }
 
-@media(max-width:500px){
+@media(max-width:600px){
+
+  main{
+    padding:12px;
+  }
+
+  .hero{
+    padding:21px;
+  }
+
+  .hero h2{
+    font-size:28px;
+  }
 
   .teams{
     font-size:16px;
   }
 
-  .hero h2{
-    font-size:26px;
+  .odds{
+    grid-template-columns:repeat(2,1fr);
+  }
+
+  .metrics{
+    grid-template-columns:repeat(3,1fr);
   }
 
 }
+
 </style>
+
 </head>
 
 <body>
@@ -282,11 +400,17 @@ footer{
   <div class="logo">B</div>
 
   <div>
+
     <h1>BetLord</h1>
-    <small>Smart Sports Odds</small>
+
+    <small>
+      Smart Sports Odds
+    </small>
+
   </div>
 
 </header>
+
 
 <nav>
 
@@ -294,7 +418,10 @@ footer{
     🏠 Home
   </button>
 
-  <button id="basketBtn" class="active">
+  <button
+    id="basketBtn"
+    class="active"
+  >
     🏀 Basketball
   </button>
 
@@ -308,6 +435,7 @@ footer{
 
 </nav>
 
+
 <main>
 
 <section class="hero">
@@ -317,39 +445,57 @@ footer{
   </h2>
 
   <p id="pageDescription">
-    Available basketball games with Over/Under markets
-    and BetLord market analysis.
+    All available basketball games with
+    intelligent Over/Under market analysis.
   </p>
 
 </section>
 
-<button class="refresh" onclick="loadBasketball()">
+
+<button
+  class="refresh"
+  onclick="loadBasketball()"
+>
   🔄 Refresh Basketball Odds
 </button>
 
-<div id="status" class="status">
-  Loading basketball leagues...
+
+<div
+  id="status"
+  class="status"
+>
+  Loading basketball data...
 </div>
+
 
 <div id="games">
 
   <div class="loading">
-    🏀 Loading games...
+    🏀 Loading basketball games...
   </div>
 
 </div>
 
 </main>
 
+
 <footer>
 
-  BetLord • Smart Sports Odds Dashboard<br>
+  BetLord • Smart Basketball Prediction Engine
+  <br>
 
-  Market signals are not guaranteed results.
+  Market signals are analytical estimates,
+  not guaranteed results.
 
 </footer>
 
+
 <script>
+
+
+/* =========================================================
+   SECURITY
+========================================================= */
 
 function escapeHTML(value){
 
@@ -363,20 +509,9 @@ function escapeHTML(value){
 }
 
 
-function average(values){
-
-  if(!values.length){
-    return 0;
-  }
-
-  return values.reduce(function(total,value){
-
-    return total + value;
-
-  },0) / values.length;
-
-}
-
+/* =========================================================
+   TIME
+========================================================= */
 
 function formatTime(value){
 
@@ -384,311 +519,1036 @@ function formatTime(value){
     return "";
   }
 
-  const date = new Date(value);
+  const date =
+    new Date(value);
 
-  if(Number.isNaN(date.getTime())){
+  if(
+    Number.isNaN(
+      date.getTime()
+    )
+  ){
     return "";
   }
 
-  return date.toLocaleString([],{
-    day:"2-digit",
-    month:"short",
-    hour:"2-digit",
-    minute:"2-digit"
-  });
+  return date.toLocaleString(
+    "en-NG",
+    {
+      timeZone:"Africa/Lagos",
+      day:"2-digit",
+      month:"short",
+      hour:"2-digit",
+      minute:"2-digit"
+    }
+  );
 
 }
 
 
-/*
-  BetLord market engine.
+/* =========================================================
+   MATH
+========================================================= */
 
-  It checks every bookmaker instead of only bookmaker #1.
-*/
+function average(values){
 
-function getConsensusTotals(game){
-
-  if(!Array.isArray(game.bookmakers)){
-    return null;
+  if(
+    !Array.isArray(values) ||
+    values.length === 0
+  ){
+    return 0;
   }
+
+  return values.reduce(
+    function(sum,value){
+      return sum + value;
+    },
+    0
+  ) / values.length;
+
+}
+
+
+function median(values){
+
+  if(
+    !Array.isArray(values) ||
+    values.length === 0
+  ){
+    return 0;
+  }
+
+  const sorted =
+    values
+      .slice()
+      .sort(
+        function(a,b){
+          return a-b;
+        }
+      );
+
+  const middle =
+    Math.floor(
+      sorted.length / 2
+    );
+
+  if(
+    sorted.length % 2 === 0
+  ){
+
+    return (
+      sorted[middle-1] +
+      sorted[middle]
+    ) / 2;
+
+  }
+
+  return sorted[middle];
+
+}
+
+
+function clamp(
+  value,
+  min,
+  max
+){
+
+  return Math.min(
+    max,
+    Math.max(
+      min,
+      value
+    )
+  );
+
+}
+
+
+/* =========================================================
+   GET ALL TOTAL MARKETS
+========================================================= */
+
+function collectTotals(game){
 
   const candidates = [];
 
-  game.bookmakers.forEach(function(bookmaker){
+  if(
+    !game ||
+    !Array.isArray(
+      game.bookmakers
+    )
+  ){
+    return candidates;
+  }
 
-    if(!Array.isArray(bookmaker.markets)){
-      return;
+
+  game.bookmakers.forEach(
+    function(bookmaker){
+
+      if(
+        !Array.isArray(
+          bookmaker.markets
+        )
+      ){
+        return;
+      }
+
+
+      bookmaker.markets.forEach(
+        function(market){
+
+          if(
+            market.key !== "totals"
+          ){
+            return;
+          }
+
+
+          if(
+            !Array.isArray(
+              market.outcomes
+            )
+          ){
+            return;
+          }
+
+
+          const over =
+            market.outcomes.find(
+              function(outcome){
+                return (
+                  String(
+                    outcome.name
+                  ).toLowerCase() === "over"
+                );
+              }
+            );
+
+
+          const under =
+            market.outcomes.find(
+              function(outcome){
+                return (
+                  String(
+                    outcome.name
+                  ).toLowerCase() === "under"
+                );
+              }
+            );
+
+
+          if(
+            !over ||
+            !under
+          ){
+            return;
+          }
+
+
+          const point =
+            Number(
+              over.point
+            );
+
+
+          const underPoint =
+            Number(
+              under.point
+            );
+
+
+          const overPrice =
+            Number(
+              over.price
+            );
+
+
+          const underPrice =
+            Number(
+              under.price
+            );
+
+
+          if(
+            !Number.isFinite(point) ||
+            !Number.isFinite(underPoint) ||
+            !Number.isFinite(overPrice) ||
+            !Number.isFinite(underPrice)
+          ){
+            return;
+          }
+
+
+          /*
+            Only accept genuine O/U pairs.
+          */
+
+          if(
+            Math.abs(
+              point - underPoint
+            ) > 0.01
+          ){
+            return;
+          }
+
+
+          if(
+            overPrice <= 1 ||
+            underPrice <= 1
+          ){
+            return;
+          }
+
+
+          candidates.push({
+
+            bookmaker:
+              bookmaker.title ||
+              bookmaker.key ||
+              "Bookmaker",
+
+            bookmakerKey:
+              bookmaker.key ||
+              "",
+
+            point,
+
+            overPrice,
+
+            underPrice
+
+          });
+
+        }
+      );
+
     }
+  );
 
-    bookmaker.markets.forEach(function(market){
 
-      if(market.key !== "totals"){
-        return;
+  return candidates;
+
+}
+
+
+/* =========================================================
+   GROUP TOTAL LINES
+========================================================= */
+
+function groupByLine(
+  candidates
+){
+
+  const groups = {};
+
+  candidates.forEach(
+    function(item){
+
+      const key =
+        item.point.toFixed(1);
+
+      if(
+        !groups[key]
+      ){
+        groups[key] = [];
       }
 
-      if(!Array.isArray(market.outcomes)){
-        return;
+      groups[key].push(item);
+
+    }
+  );
+
+  return groups;
+
+}
+
+
+/* =========================================================
+   FIND CONSENSUS LINE
+========================================================= */
+
+function chooseConsensusLine(
+  candidates
+){
+
+  if(
+    candidates.length === 0
+  ){
+    return null;
+  }
+
+
+  const groups =
+    groupByLine(
+      candidates
+    );
+
+
+  let bestGroup =
+    null;
+
+
+  Object.values(groups)
+    .forEach(
+      function(group){
+
+        if(
+          !bestGroup
+        ){
+
+          bestGroup =
+            group;
+
+          return;
+
+        }
+
+
+        /*
+          Primary:
+          bookmaker count.
+
+          Secondary:
+          smaller line dispersion.
+
+          Tertiary:
+          more balanced market.
+        */
+
+        if(
+          group.length >
+          bestGroup.length
+        ){
+
+          bestGroup =
+            group;
+
+          return;
+
+        }
+
+
+        if(
+          group.length ===
+          bestGroup.length
+        ){
+
+          const groupSpread =
+            calculatePriceSpread(
+              group
+            );
+
+
+          const bestSpread =
+            calculatePriceSpread(
+              bestGroup
+            );
+
+
+          if(
+            groupSpread <
+            bestSpread
+          ){
+
+            bestGroup =
+              group;
+
+          }
+
+        }
+
       }
-
-      const over = market.outcomes.find(function(outcome){
-
-        return outcome.name === "Over";
-
-      });
-
-      const under = market.outcomes.find(function(outcome){
-
-        return outcome.name === "Under";
-
-      });
-
-      if(!over || !under){
-        return;
-      }
-
-      if(over.point == null || under.point == null){
-        return;
-      }
-
-      if(over.price == null || under.price == null){
-        return;
-      }
-
-      const point = Number(over.point);
-
-      const overPrice = Number(over.price);
-
-      const underPrice = Number(under.price);
-
-      if(!Number.isFinite(point)){
-        return;
-      }
-
-      if(!Number.isFinite(overPrice)){
-        return;
-      }
-
-      if(!Number.isFinite(underPrice)){
-        return;
-      }
-
-      if(overPrice <= 1 || underPrice <= 1){
-        return;
-      }
-
-      candidates.push({
-
-        bookmaker:
-          bookmaker.title ||
-          bookmaker.key ||
-          "Bookmaker",
-
-        point:point,
-
-        overPrice:overPrice,
-
-        underPrice:underPrice
-
-      });
-
-    });
-
-  });
+    );
 
 
-  if(!candidates.length){
+  if(
+    !bestGroup
+  ){
+    return null;
+  }
+
+
+  return {
+
+    point:
+      median(
+        bestGroup.map(
+          x => x.point
+        )
+      ),
+
+    overPrice:
+      median(
+        bestGroup.map(
+          x => x.overPrice
+        )
+      ),
+
+    underPrice:
+      median(
+        bestGroup.map(
+          x => x.underPrice
+        )
+      ),
+
+    bookmakers:
+      bestGroup.length,
+
+    sources:
+      bestGroup
+
+  };
+
+}
+
+
+/* =========================================================
+   PRICE SPREAD
+========================================================= */
+
+function calculatePriceSpread(
+  group
+){
+
+  if(
+    !group ||
+    group.length < 2
+  ){
+    return 0;
+  }
+
+
+  const overPrices =
+    group.map(
+      x => x.overPrice
+    );
+
+
+  const underPrices =
+    group.map(
+      x => x.underPrice
+    );
+
+
+  return (
+    Math.max(...overPrices) -
+    Math.min(...overPrices) +
+    Math.max(...underPrices) -
+    Math.min(...underPrices)
+  );
+
+}
+
+
+/* =========================================================
+   NORMALIZED MARKET PROBABILITY
+========================================================= */
+
+function calculateProbability(
+  overPrice,
+  underPrice
+){
+
+  if(
+    overPrice <= 1 ||
+    underPrice <= 1
+  ){
     return null;
   }
 
 
   /*
-    Group bookmakers by their total line.
+    Decimal odds -> implied probability.
   */
 
-  const groups = {};
-
-  candidates.forEach(function(item){
-
-    const key = String(item.point);
-
-    if(!groups[key]){
-      groups[key] = [];
-    }
-
-    groups[key].push(item);
-
-  });
+  const overRaw =
+    1 / overPrice;
 
 
-  let bestGroup = null;
+  const underRaw =
+    1 / underPrice;
 
 
-  Object.values(groups).forEach(function(group){
-
-    if(!bestGroup){
-
-      bestGroup = group;
-
-      return;
-
-    }
+  const total =
+    overRaw +
+    underRaw;
 
 
-    /*
-      First priority:
-      most bookmakers using the same line.
-    */
-
-    if(group.length > bestGroup.length){
-
-      bestGroup = group;
-
-      return;
-
-    }
+  if(
+    total <= 0
+  ){
+    return null;
+  }
 
 
-    /*
-      If tied, prefer the line whose
-      Over/Under pricing is more balanced.
-    */
+  return {
 
-    if(group.length === bestGroup.length){
+    over:
+      overRaw / total,
 
-      const groupDifference =
-        Math.abs(
-          average(group.map(function(x){
-            return x.overPrice;
-          })) -
-          average(group.map(function(x){
-            return x.underPrice;
-          }))
+    under:
+      underRaw / total
+
+  };
+
+}
+
+
+/* =========================================================
+   BOOKMAKER AGREEMENT
+========================================================= */
+
+function calculateAgreement(
+  candidates,
+  pick
+){
+
+  if(
+    !candidates.length
+  ){
+    return 0;
+  }
+
+
+  let agreeing =
+    0;
+
+
+  candidates.forEach(
+    function(item){
+
+      const probabilities =
+        calculateProbability(
+          item.overPrice,
+          item.underPrice
         );
 
 
-      const bestDifference =
-        Math.abs(
-          average(bestGroup.map(function(x){
-            return x.overPrice;
-          })) -
-          average(bestGroup.map(function(x){
-            return x.underPrice;
-          }))
-        );
+      if(!probabilities){
+        return;
+      }
 
 
-      if(groupDifference < bestDifference){
+      const bookmakerPick =
+        probabilities.over >
+        probabilities.under
+          ? "OVER"
+          : probabilities.under >
+            probabilities.over
+            ? "UNDER"
+            : "NONE";
 
-        bestGroup = group;
+
+      if(
+        bookmakerPick ===
+        pick
+      ){
+
+        agreeing++;
 
       }
 
     }
+  );
 
-  });
+
+  return (
+    agreeing /
+    candidates.length
+  );
+
+}
 
 
-  const avgOver =
-    average(
-      bestGroup.map(function(x){
-        return x.overPrice;
-      })
+/* =========================================================
+   LINE STABILITY
+========================================================= */
+
+function calculateLineStability(
+  candidates,
+  consensusPoint
+){
+
+  if(
+    !candidates.length
+  ){
+    return 0;
+  }
+
+
+  const differences =
+    candidates.map(
+      function(item){
+
+        return Math.abs(
+          item.point -
+          consensusPoint
+        );
+
+      }
     );
 
 
-  const avgUnder =
+  const averageDifference =
     average(
-      bestGroup.map(function(x){
-        return x.underPrice;
-      })
+      differences
     );
 
 
   /*
-    Convert decimal odds into implied probability.
-    Then remove bookmaker margin by normalizing them.
+    Smaller difference =
+    stronger stability.
   */
 
-  const overRaw = 1 / avgOver;
+  if(
+    averageDifference <= 0.1
+  ){
+    return 1;
+  }
 
-  const underRaw = 1 / avgUnder;
+  if(
+    averageDifference <= 0.25
+  ){
+    return 0.95;
+  }
 
-  const totalRaw =
-    overRaw + underRaw;
+  if(
+    averageDifference <= 0.5
+  ){
+    return 0.85;
+  }
+
+  if(
+    averageDifference <= 1
+  ){
+    return 0.70;
+  }
+
+  if(
+    averageDifference <= 1.5
+  ){
+    return 0.55;
+  }
+
+  return 0.40;
+
+}
 
 
-  const overProbability =
-    overRaw / totalRaw;
+/* =========================================================
+   MARKET BALANCE
+========================================================= */
+
+function calculateMarketBalance(
+  probabilities
+){
+
+  if(!probabilities){
+    return 0;
+  }
 
 
-  const underProbability =
-    underRaw / totalRaw;
-
-
-  const overPercent =
-    overProbability * 100;
-
-
-  const underPercent =
-    underProbability * 100;
-
-
-  /*
-    Difference between Over and Under.
-
-    Example:
-
-    Over 54%
-    Under 46%
-
-    Edge = 8 percentage points.
-  */
-
-  const edge =
+  const difference =
     Math.abs(
-      overPercent - underPercent
+      probabilities.over -
+      probabilities.under
     );
 
 
-  let pick = "NO BET";
+  /*
+    0 = perfectly balanced.
+    Larger = stronger directional signal.
+  */
+
+  return clamp(
+    difference * 2,
+    0,
+    1
+  );
+
+}
 
 
-  if(edge >= 6){
+/* =========================================================
+   SMART PREDICTION ENGINE
+========================================================= */
 
-    pick =
-      overPercent > underPercent
-        ? "OVER"
-        : "UNDER";
+function buildPrediction(
+  game
+){
+
+  const candidates =
+    collectTotals(
+      game
+    );
+
+
+  if(
+    candidates.length === 0
+  ){
+
+    return {
+
+      available:false
+
+    };
 
   }
 
 
+  const consensus =
+    chooseConsensusLine(
+      candidates
+    );
+
+
+  if(!consensus){
+
+    return {
+
+      available:false
+
+    };
+
+  }
+
+
+  const probabilities =
+    calculateProbability(
+      consensus.overPrice,
+      consensus.underPrice
+    );
+
+
+  if(!probabilities){
+
+    return {
+
+      available:false
+
+    };
+
+  }
+
+
+  const pick =
+    probabilities.over >
+    probabilities.under
+      ? "OVER"
+      : probabilities.under >
+        probabilities.over
+        ? "UNDER"
+        : "NONE";
+
+
+  const selectedProbability =
+    pick === "OVER"
+      ? probabilities.over
+      : pick === "UNDER"
+        ? probabilities.under
+        : 0.50;
+
+
+  const agreement =
+    calculateAgreement(
+      consensus.sources,
+      pick
+    );
+
+
+  const stability =
+    calculateLineStability(
+      candidates,
+      consensus.point
+    );
+
+
+  const marketBalance =
+    calculateMarketBalance(
+      probabilities
+    );
+
+
   /*
-    Signal strength.
+    Market edge.
 
-    This is deliberately conservative.
+    Example:
+    51% vs 49% = weak
+    55% vs 45% = moderate
+    60% vs 40% = strong
+  */
 
-    It is NOT claiming a 70% guaranteed
-    chance of winning.
+  const probabilityEdge =
+    Math.abs(
+      probabilities.over -
+      probabilities.under
+    );
+
+
+  /*
+    Number of bookmakers matters.
+
+    More independent books =
+    stronger consensus.
+  */
+
+  const bookmakerScore =
+    clamp(
+      consensus.bookmakers / 8,
+      0,
+      1
+    );
+
+
+  /*
+    Weighted model.
+
+    Market probability:
+      45%
+
+    Bookmaker agreement:
+      25%
+
+    Line stability:
+      15%
+
+    Bookmaker coverage:
+      15%
+  */
+
+  const rawScore =
+
+    (
+      probabilityEdge *
+      0.45
+    )
+
+    +
+
+    (
+      agreement *
+      0.25
+    )
+
+    +
+
+    (
+      stability *
+      0.15
+    )
+
+    +
+
+    (
+      bookmakerScore *
+      0.15
+    );
+
+
+  /*
+    Convert to a user-friendly confidence.
+
+    The model intentionally keeps
+    confidence conservative.
   */
 
   let confidence =
+    50 +
+    (
+      rawScore *
+      50
+    );
+
+
+  /*
+    Small probability differences
+    should never become huge confidence.
+  */
+
+  if(
+    probabilityEdge < 0.02
+  ){
+
+    confidence =
+      Math.min(
+        confidence,
+        52
+      );
+
+  }
+
+
+  if(
+    probabilityEdge < 0.04
+  ){
+
+    confidence =
+      Math.min(
+        confidence,
+        56
+      );
+
+  }
+
+
+  if(
+    probabilityEdge < 0.06
+  ){
+
+    confidence =
+      Math.min(
+        confidence,
+        61
+      );
+
+  }
+
+
+  confidence =
     Math.round(
-      Math.max(
-        overPercent,
-        underPercent
+      clamp(
+        confidence,
+        50,
+        75
       )
     );
 
 
-  if(pick === "NO BET"){
+  /*
+    NO BET rules.
 
-    confidence =
-      Math.round(
-        Math.max(
-          overPercent,
-          underPercent
-        )
+    BetLord refuses to force a pick when:
+
+    - probability difference is too small
+    - bookmaker agreement is weak
+    - too few bookmakers
+    - market is unstable
+  */
+
+  let decision =
+    "NO BET";
+
+
+  let reason =
+    "";
+
+
+  if(
+    consensus.bookmakers < 2
+  ){
+
+    reason =
+      "Not enough bookmakers are offering the same total line.";
+
+  }
+
+  else if(
+    probabilityEdge < 0.025
+  ){
+
+    reason =
+      "The Over/Under market is extremely balanced.";
+
+  }
+
+  else if(
+    agreement < 0.55
+  ){
+
+    reason =
+      "Bookmakers are not showing enough directional agreement.";
+
+  }
+
+  else if(
+    stability < 0.55
+  ){
+
+    reason =
+      "The available total lines are too spread out.";
+
+  }
+
+  else if(
+    confidence < 55
+  ){
+
+    reason =
+      "The market signal is too weak for a confident selection.";
+
+  }
+
+  else {
+
+    decision =
+      pick;
+
+    reason =
+      buildReason(
+        pick,
+        probabilities,
+        agreement,
+        stability,
+        consensus.bookmakers
       );
 
   }
@@ -696,44 +1556,116 @@ function getConsensusTotals(game){
 
   return {
 
-    point:bestGroup[0].point,
+    available:true,
 
-    overPrice:avgOver,
+    point:
+      consensus.point,
 
-    underPrice:avgUnder,
+    overPrice:
+      consensus.overPrice,
 
-    bookmakers:bestGroup.length,
+    underPrice:
+      consensus.underPrice,
 
-    pick:pick,
+    bookmakers:
+      consensus.bookmakers,
 
-    overPercent:overPercent,
+    overProbability:
+      probabilities.over,
 
-    underPercent:underPercent,
+    underProbability:
+      probabilities.under,
 
-    edge:edge,
+    probabilityEdge,
 
-    confidence:confidence
+    agreement,
+
+    stability,
+
+    confidence,
+
+    decision,
+
+    reason
 
   };
 
 }
 
 
-/*
-  Render basketball games.
-*/
+/* =========================================================
+   EXPLANATION
+========================================================= */
 
-function renderGames(games){
+function buildReason(
+  pick,
+  probabilities,
+  agreement,
+  stability,
+  bookmakers
+){
+
+  const probabilityText =
+    Math.round(
+      (
+        pick === "OVER"
+          ? probabilities.over
+          : probabilities.under
+      ) * 100
+    );
+
+
+  const agreementText =
+    Math.round(
+      agreement * 100
+    );
+
+
+  const stabilityText =
+    Math.round(
+      stability * 100
+    );
+
+
+  return (
+    pick +
+    " has the stronger market probability at " +
+    probabilityText +
+    "%. " +
+    agreementText +
+    "% of analysed bookmaker prices support the same direction, " +
+    "with " +
+    stabilityText +
+    "% line stability across " +
+    bookmakers +
+    " bookmaker(s)."
+  );
+
+}
+
+
+/* =========================================================
+   RENDER GAMES
+========================================================= */
+
+function renderGames(
+  games
+){
 
   const container =
-    document.getElementById("games");
+    document.getElementById(
+      "games"
+    );
 
 
-  if(!Array.isArray(games) || !games.length){
+  if(
+    !Array.isArray(games) ||
+    games.length === 0
+  ){
 
     container.innerHTML =
-      '<div class="loading">' +
-      'No basketball games with available odds right now.' +
+      '<div class="empty">' +
+      'No basketball games with available Over/Under markets were found for today.' +
       '</div>';
 
     return;
@@ -742,121 +1674,60 @@ function renderGames(games){
 
 
   container.innerHTML =
-    games.map(function(game){
+    games.map(
+      function(game){
 
-      const totals =
-        getConsensusTotals(game);
-
-
-      let oddsHTML = "";
-
-      let predictionHTML = "";
+        const prediction =
+          buildPrediction(
+            game
+          );
 
 
-      if(totals){
-
-        oddsHTML =
-
-          '<div class="odd">' +
-
-            '<span>OVER</span>' +
-
-            escapeHTML(
-              totals.point
-            ) +
-
-            ' @ ' +
-
-            totals.overPrice.toFixed(2) +
-
-          '</div>' +
+        let oddsHTML = "";
 
 
-          '<div class="odd">' +
+        if(
+          prediction.available
+        ){
 
-            '<span>UNDER</span>' +
+          oddsHTML =
 
-            escapeHTML(
-              totals.point
-            ) +
+            '<div class="odd">' +
 
-            ' @ ' +
+              '<span>OVER</span>' +
 
-            totals.underPrice.toFixed(2) +
+              '<div class="odd-value">' +
 
-          '</div>';
+                escapeHTML(
+                  prediction.point
+                ) +
 
+                ' @ ' +
 
-        if(totals.pick === "NO BET"){
-
-          predictionHTML =
-
-            '<div class="prediction no-bet">' +
-
-              '<div class="prediction-title">' +
-                '⚠️ BetLord Signal' +
-              '</div>' +
-
-              '<div class="pick">' +
-                'NO BET' +
-              '</div>' +
-
-              '<div class="confidence">' +
-
-                'Over: ' +
-                totals.overPercent.toFixed(0) +
-                '% • ' +
-
-                'Under: ' +
-                totals.underPercent.toFixed(0) +
-                '%' +
+                escapeHTML(
+                  prediction.overPrice.toFixed(2)
+                ) +
 
               '</div>' +
 
-              '<div class="note">' +
+            '</div>' +
 
-                'The Over/Under market is too close ' +
-                'to call safely. BetLord will not force ' +
-                'a selection.' +
 
-              '</div>' +
+            '<div class="odd">' +
 
-            '</div>';
+              '<span>UNDER</span>' +
 
-        }else{
+              '<div class="odd-value">' +
 
-          predictionHTML =
+                escapeHTML(
+                  prediction.point
+                ) +
 
-            '<div class="prediction bet">' +
+                ' @ ' +
 
-              '<div class="prediction-title">' +
-                '🤖 BetLord Prediction' +
-              '</div>' +
-
-              '<div class="pick">' +
-
-                'BET ' +
-                totals.pick +
-                ' ' +
-                totals.point +
-
-              '</div>' +
-
-              '<div class="confidence">' +
-
-                'Market signal: ' +
-                totals.confidence +
-                '% • ' +
-                totals.bookmakers +
-                ' bookmaker(s)' +
-
-              '</div>' +
-
-              '<div class="note">' +
-
-                'Consensus signal based on bookmaker ' +
-                'Over/Under pricing. It is not a ' +
-                'guarantee of the result.' +
+                escapeHTML(
+                  prediction.underPrice.toFixed(2)
+                ) +
 
               '</div>' +
 
@@ -864,132 +1735,383 @@ function renderGames(games){
 
         }
 
-      }else{
+        else {
 
-        oddsHTML =
+          oddsHTML =
+            '<div class="no-pick">' +
+            'Over/Under market currently unavailable.' +
+            '</div>';
 
-          '<div class="no-pick">' +
+        }
 
-          'Over/Under market currently unavailable.' +
 
-          '</div>';
+        let predictionHTML = "";
+
+
+        if(
+          prediction.available
+        ){
+
+          if(
+            prediction.decision ===
+            "NO BET"
+          ){
+
+            predictionHTML =
+
+              '<div class="prediction no-bet">' +
+
+                '<div class="no-bet-title">' +
+                  '⚠️ BETLORD SIGNAL' +
+                '</div>' +
+
+                '<div class="no-bet-pick">' +
+                  'NO BET' +
+                '</div>' +
+
+                '<div class="confidence">' +
+
+                  'Over: ' +
+
+                  Math.round(
+                    prediction.overProbability * 100
+                  ) +
+
+                  '% • Under: ' +
+
+                  Math.round(
+                    prediction.underProbability * 100
+                  ) +
+
+                  '%' +
+
+                '</div>' +
+
+                '<div class="reason">' +
+                  escapeHTML(
+                    prediction.reason
+                  ) +
+                '</div>' +
+
+                '<div class="metrics">' +
+
+                  '<div class="metric">' +
+
+                    '<span class="metric-label">' +
+                      'BOOKS' +
+                    '</span>' +
+
+                    '<span class="metric-value">' +
+                      prediction.bookmakers +
+                    '</span>' +
+
+                  '</div>' +
+
+
+                  '<div class="metric">' +
+
+                    '<span class="metric-label">' +
+                      'EDGE' +
+                    '</span>' +
+
+                    '<span class="metric-value">' +
+
+                      (
+                        prediction.probabilityEdge * 100
+                      ).toFixed(1) +
+
+                      '%' +
+
+                    '</span>' +
+
+                  '</div>' +
+
+
+                  '<div class="metric">' +
+
+                    '<span class="metric-label">' +
+                      'STABILITY' +
+                    '</span>' +
+
+                    '<span class="metric-value">' +
+
+                      Math.round(
+                        prediction.stability * 100
+                      ) +
+
+                      '%' +
+
+                    '</span>' +
+
+                  '</div>' +
+
+                '</div>' +
+
+              '</div>';
+
+          }
+
+          else {
+
+            predictionHTML =
+
+              '<div class="prediction bet">' +
+
+                '<div class="prediction-title">' +
+                  '🤖 BETLORD PREDICTION' +
+                '</div>' +
+
+                '<div class="pick">' +
+
+                  'BET ' +
+
+                  escapeHTML(
+                    prediction.decision
+                  ) +
+
+                  ' ' +
+
+                  escapeHTML(
+                    prediction.point
+                  ) +
+
+                '</div>' +
+
+                '<div class="confidence">' +
+
+                  'Model confidence: ' +
+
+                  prediction.confidence +
+
+                  '% • ' +
+
+                  prediction.bookmakers +
+
+                  ' bookmaker(s)' +
+
+                '</div>' +
+
+                '<div class="reason">' +
+
+                  escapeHTML(
+                    prediction.reason
+                  ) +
+
+                '</div>' +
+
+                '<div class="metrics">' +
+
+                  '<div class="metric">' +
+
+                    '<span class="metric-label">' +
+                      'EDGE' +
+                    '</span>' +
+
+                    '<span class="metric-value">' +
+
+                      (
+                        prediction.probabilityEdge * 100
+                      ).toFixed(1) +
+
+                      '%' +
+
+                    '</span>' +
+
+                  '</div>' +
+
+
+                  '<div class="metric">' +
+
+                    '<span class="metric-label">' +
+                      'AGREEMENT' +
+                    '</span>' +
+
+                    '<span class="metric-value">' +
+
+                      Math.round(
+                        prediction.agreement * 100
+                      ) +
+
+                      '%' +
+
+                    '</span>' +
+
+                  '</div>' +
+
+
+                  '<div class="metric">' +
+
+                    '<span class="metric-label">' +
+                      'STABILITY' +
+                    '</span>' +
+
+                    '<span class="metric-value">' +
+
+                      Math.round(
+                        prediction.stability * 100
+                      ) +
+
+                      '%' +
+
+                    '</span>' +
+
+                  '</div>' +
+
+                '</div>' +
+
+              '</div>';
+
+          }
+
+        }
+
+        else {
+
+          predictionHTML =
+
+            '<div class="prediction no-bet">' +
+
+              '<div class="no-bet-title">' +
+                '⚠️ BETLORD SIGNAL' +
+              '</div>' +
+
+              '<div class="no-bet-pick">' +
+                'NO BET' +
+              '</div>' +
+
+              '<div class="reason">' +
+                'There is not enough reliable Over/Under market data for this game.' +
+              '</div>' +
+
+            '</div>';
+
+        }
+
+
+        return (
+
+          '<div class="game">' +
+
+            '<div class="league">' +
+
+              escapeHTML(
+                game.sport_title ||
+                game.sport_key ||
+                "Basketball"
+              ) +
+
+            '</div>' +
+
+
+            '<div class="teams">' +
+
+              '<div class="team">' +
+
+                escapeHTML(
+                  game.away_team ||
+                  "Away"
+                ) +
+
+              '</div>' +
+
+              '<div class="vs">' +
+                'VS' +
+              '</div>' +
+
+              '<div class="team" style="text-align:right">' +
+
+                escapeHTML(
+                  game.home_team ||
+                  "Home"
+                ) +
+
+              '</div>' +
+
+            '</div>' +
+
+
+            '<div class="time">' +
+
+              '🕒 ' +
+
+              escapeHTML(
+                formatTime(
+                  game.commence_time
+                )
+              ) +
+
+            '</div>' +
+
+
+            '<div class="odds">' +
+
+              oddsHTML +
+
+            '</div>' +
+
+
+            predictionHTML +
+
+          '</div>'
+
+        );
 
       }
-
-
-      return (
-
-        '<div class="game">' +
-
-          '<div class="league">' +
-
-            escapeHTML(
-              game.sport_title ||
-              game.sport_key ||
-              "Basketball"
-            ) +
-
-          '</div>' +
-
-
-          '<div class="teams">' +
-
-            '<div class="team">' +
-
-              escapeHTML(
-                game.away_team ||
-                "Away"
-              ) +
-
-            '</div>' +
-
-
-            '<div class="vs">' +
-              'VS' +
-            '</div>' +
-
-
-            '<div class="team" style="text-align:right">' +
-
-              escapeHTML(
-                game.home_team ||
-                "Home"
-              ) +
-
-            '</div>' +
-
-          '</div>' +
-
-
-          '<div class="time">' +
-
-            '🕒 ' +
-
-            escapeHTML(
-              formatTime(
-                game.commence_time
-              )
-            ) +
-
-          '</div>' +
-
-
-          '<div class="odds">' +
-
-            oddsHTML +
-
-          '</div>' +
-
-
-          predictionHTML +
-
-        '</div>'
-
-      );
-
-    }).join("");
+    ).join("");
 
 }
 
 
-/*
-  Load all currently active basketball leagues.
-*/
+/* =========================================================
+   LOAD BASKETBALL
+========================================================= */
 
 async function loadBasketball(){
 
   const container =
-    document.getElementById("games");
+    document.getElementById(
+      "games"
+    );
 
 
   const status =
-    document.getElementById("status");
+    document.getElementById(
+      "status"
+    );
 
 
   container.innerHTML =
     '<div class="loading">' +
-    '🏀 Loading basketball games...' +
+    '🏀 Finding today\\'s basketball games...' +
     '</div>';
 
 
   status.textContent =
-    "Finding available basketball leagues...";
+    "Searching all available basketball leagues...";
 
 
   try{
 
     const response =
-      await fetch("/api/basketball");
+      await fetch(
+        "/api/basketball",
+        {
+          cache:"no-store"
+        }
+      );
 
 
-    if(!response.ok){
+    if(
+      !response.ok
+    ){
 
-      const errorText =
+      const text =
         await response.text();
 
+
       throw new Error(
-        errorText ||
-        "Basketball API request failed"
+        text ||
+        "Basketball API request failed."
       );
 
     }
@@ -999,11 +2121,15 @@ async function loadBasketball(){
       await response.json();
 
 
-    if(!data ||
-       !Array.isArray(data.games)){
+    if(
+      !data ||
+      !Array.isArray(
+        data.games
+      )
+    ){
 
       throw new Error(
-        "Invalid basketball response"
+        "Invalid basketball response."
       );
 
     }
@@ -1017,12 +2143,17 @@ async function loadBasketball(){
       " available league(s).";
 
 
-    renderGames(data.games);
+    renderGames(
+      data.games
+    );
 
 
-  }catch(error){
+  }
+  catch(error){
 
-    console.error(error);
+    console.error(
+      error
+    );
 
 
     status.textContent =
@@ -1033,7 +2164,7 @@ async function loadBasketball(){
 
       '<div class="error">' +
 
-        'Unable to load basketball odds.' +
+        'Unable to load basketball odds right now.' +
 
         '<br><br>' +
 
@@ -1048,101 +2179,150 @@ async function loadBasketball(){
 }
 
 
-/*
-  Navigation.
-*/
+/* =========================================================
+   NAVIGATION
+========================================================= */
 
-document
-  .getElementById("basketBtn")
-  .addEventListener("click",function(){
-
-    setActive(this);
-
-    document
-      .getElementById("pageTitle")
-      .textContent =
-      "Today's Basketball";
-
-
-    document
-      .getElementById("pageDescription")
-      .textContent =
-      "Available basketball games with Over/Under markets and BetLord market analysis.";
-
-
-    loadBasketball();
-
-  });
-
-
-document
-  .getElementById("homeBtn")
-  .addEventListener("click",function(){
-
-    setActive(this);
-
-    document
-      .getElementById("pageTitle")
-      .textContent =
-      "Today's Basketball";
-
-
-    document
-      .getElementById("pageDescription")
-      .textContent =
-      "Available basketball games with Over/Under markets and BetLord market analysis.";
-
-
-    loadBasketball();
-
-  });
-
-
-document
-  .getElementById("footballBtn")
-  .addEventListener("click",function(){
-
-    setActive(this);
-
-    alert(
-      "Football section will be connected next."
-    );
-
-  });
-
-
-document
-  .getElementById("popularBtn")
-  .addEventListener("click",function(){
-
-    setActive(this);
-
-    alert(
-      "Popular section will be connected next."
-    );
-
-  });
-
-
-function setActive(button){
+function setActive(
+  button
+){
 
   document
-    .querySelectorAll("nav button")
-    .forEach(function(btn){
+    .querySelectorAll(
+      "nav button"
+    )
+    .forEach(
+      function(btn){
 
-      btn.classList.remove("active");
+        btn.classList.remove(
+          "active"
+        );
 
-    });
+      }
+    );
 
 
-  button.classList.add("active");
+  button.classList.add(
+    "active"
+  );
 
 }
 
 
-/*
-  Start BetLord.
-*/
+document
+  .getElementById(
+    "basketBtn"
+  )
+  .addEventListener(
+    "click",
+    function(){
+
+      setActive(
+        this
+      );
+
+      document
+        .getElementById(
+          "pageTitle"
+        )
+        .textContent =
+        "Today's Basketball";
+
+
+      document
+        .getElementById(
+          "pageDescription"
+        )
+        .textContent =
+        "All available basketball games with intelligent Over/Under market analysis.";
+
+
+      loadBasketball();
+
+    }
+  );
+
+
+document
+  .getElementById(
+    "homeBtn"
+  )
+  .addEventListener(
+    "click",
+    function(){
+
+      setActive(
+        this
+      );
+
+
+      document
+        .getElementById(
+          "pageTitle"
+        )
+        .textContent =
+        "Today's Basketball";
+
+
+      document
+        .getElementById(
+          "pageDescription"
+        )
+        .textContent =
+        "All available basketball games with intelligent Over/Under market analysis.";
+
+
+      loadBasketball();
+
+    }
+  );
+
+
+document
+  .getElementById(
+    "footballBtn"
+  )
+  .addEventListener(
+    "click",
+    function(){
+
+      setActive(
+        this
+      );
+
+
+      alert(
+        "Football section will be connected next."
+      );
+
+    }
+  );
+
+
+document
+  .getElementById(
+    "popularBtn"
+  )
+  .addEventListener(
+    "click",
+    function(){
+
+      setActive(
+        this
+      );
+
+
+      alert(
+        "Popular section will be connected next."
+      );
+
+    }
+  );
+
+
+/* =========================================================
+   INITIAL LOAD
+========================================================= */
 
 loadBasketball();
 
@@ -1153,23 +2333,38 @@ loadBasketball();
 `;
 
 
+/* =========================================================
+   SERVER
+========================================================= */
+
 export default {
 
-  async fetch(request, env) {
+  async fetch(
+    request,
+    env
+  ){
 
     const url =
-      new URL(request.url);
+      new URL(
+        request.url
+      );
 
 
     const apiKey =
-      env.BETLORD_API_KEY || "";
+      env.BETLORD_API_KEY ||
+      "";
 
 
     /*
-      Basketball API.
+    ---------------------------------------------------------
+    BASKETBALL API
+    ---------------------------------------------------------
     */
 
-    if(url.pathname === "/api/basketball"){
+    if(
+      url.pathname ===
+      "/api/basketball"
+    ){
 
       if(!apiKey){
 
@@ -1177,7 +2372,7 @@ export default {
 
           JSON.stringify({
             error:
-              "BETLORD_API_KEY is missing"
+              "BETLORD_API_KEY is missing."
           }),
 
           {
@@ -1187,6 +2382,7 @@ export default {
               "Content-Type":
                 "application/json"
             }
+
           }
 
         );
@@ -1195,10 +2391,11 @@ export default {
 
 
       /*
-        Get currently available sports.
+      -------------------------------------------------------
+      GET ALL SPORTS
 
-        The sports endpoint does not consume
-        normal odds quota.
+      /sports does not consume odds quota.
+      -------------------------------------------------------
       */
 
       const sportsResponse =
@@ -1206,12 +2403,16 @@ export default {
 
           API_URL +
           "/v4/sports/?apiKey=" +
-          encodeURIComponent(apiKey)
+          encodeURIComponent(
+            apiKey
+          )
 
         );
 
 
-      if(!sportsResponse.ok){
+      if(
+        !sportsResponse.ok
+      ){
 
         return new Response(
 
@@ -1225,6 +2426,7 @@ export default {
               "Content-Type":
                 "application/json"
             }
+
           }
 
         );
@@ -1237,42 +2439,109 @@ export default {
 
 
       /*
-        Find active basketball leagues.
+      -------------------------------------------------------
+      FIND ALL ACTIVE BASKETBALL LEAGUES
+      -------------------------------------------------------
       */
 
       const basketballSports =
-        sports.filter(function(sport){
+        sports.filter(
 
-          return (
+          function(sport){
 
-            sport &&
+            if(!sport){
+              return false;
+            }
 
-            sport.active === true &&
 
-            String(
-              sport.group || ""
-            )
-            .toLowerCase()
-            .includes("basketball")
+            const group =
+              String(
+                sport.group ||
+                ""
+              ).toLowerCase();
 
-          );
 
-        });
+            return (
+              sport.active === true &&
+              group.includes(
+                "basketball"
+              )
+            );
+
+          }
+
+        );
 
 
       /*
-        Request totals from every available
-        basketball league.
+      -------------------------------------------------------
+      TODAY'S DATE IN NIGERIA
+      -------------------------------------------------------
+      */
 
-        We use UK region here because it
-        provides a useful bookmaker pool.
+      const now =
+        new Date();
 
-        We can change the region later if
-        we get a direct SportyBet integration.
+
+      const nigeriaDate =
+        new Intl.DateTimeFormat(
+          "en-CA",
+          {
+            timeZone:
+              "Africa/Lagos",
+            year:"numeric",
+            month:"2-digit",
+            day:"2-digit"
+          }
+        ).format(
+          now
+        );
+
+
+      /*
+      Convert Nigeria midnight boundaries
+      to UTC ISO timestamps.
+
+      Nigeria is UTC+1.
+      -------------------------------------------------------
+      */
+
+      const dayStart =
+        new Date(
+          nigeriaDate +
+          "T00:00:00+01:00"
+        );
+
+
+      const nextDay =
+        new Date(
+          dayStart.getTime() +
+          (
+            24 *
+            60 *
+            60 *
+            1000
+          )
+        );
+
+
+      const commenceFrom =
+        dayStart.toISOString();
+
+
+      const commenceTo =
+        nextDay.toISOString();
+
+
+      /*
+      -------------------------------------------------------
+      FETCH EACH ACTIVE BASKETBALL LEAGUE
+      -------------------------------------------------------
       */
 
       const requests =
         basketballSports.map(
+
           async function(sport){
 
             const oddsUrl =
@@ -1287,11 +2556,23 @@ export default {
 
               "/odds" +
 
-              "?regions=uk" +
+              "?regions=uk,eu,us,au" +
 
-              "&markets=totals" +
+              "&markets=totals,h2h,spreads" +
 
               "&oddsFormat=decimal" +
+
+              "&commenceTimeFrom=" +
+
+              encodeURIComponent(
+                commenceFrom
+              ) +
+
+              "&commenceTimeTo=" +
+
+              encodeURIComponent(
+                commenceTo
+              ) +
 
               "&apiKey=" +
 
@@ -1303,10 +2584,21 @@ export default {
             try{
 
               const response =
-                await fetch(oddsUrl);
+                await fetch(
+                  oddsUrl
+                );
 
 
-              if(!response.ok){
+              if(
+                !response.ok
+              ){
+
+                console.error(
+                  "Odds request failed:",
+                  sport.key,
+                  response.status
+                );
+
 
                 return [];
 
@@ -1317,7 +2609,11 @@ export default {
                 await response.json();
 
 
-              if(!Array.isArray(games)){
+              if(
+                !Array.isArray(
+                  games
+                )
+              ){
 
                 return [];
 
@@ -1325,6 +2621,7 @@ export default {
 
 
               return games.map(
+
                 function(game){
 
                   return {
@@ -1332,23 +2629,21 @@ export default {
                     ...game,
 
                     sport_title:
-
                       game.sport_title ||
-
                       sport.title ||
-
                       sport.key
 
                   };
 
                 }
+
               );
 
-
-            }catch(error){
+            }
+            catch(error){
 
               console.error(
-                "Basketball request failed:",
+                "Failed basketball league:",
                 sport.key,
                 error
               );
@@ -1359,6 +2654,7 @@ export default {
             }
 
           }
+
         );
 
 
@@ -1368,6 +2664,12 @@ export default {
         );
 
 
+      /*
+      -------------------------------------------------------
+      COMBINE ALL GAMES
+      -------------------------------------------------------
+      */
+
       const games =
         results
           .flat()
@@ -1375,7 +2677,9 @@ export default {
 
 
       /*
-        Remove duplicate games.
+      -------------------------------------------------------
+      REMOVE DUPLICATES
+      -------------------------------------------------------
       */
 
       const unique =
@@ -1383,14 +2687,18 @@ export default {
 
           new Map(
 
-            games.map(function(game){
+            games.map(
 
-              return [
-                game.id,
-                game
-              ];
+              function(game){
 
-            })
+                return [
+                  game.id,
+                  game
+                ];
+
+              }
+
+            )
 
           ).values()
 
@@ -1398,29 +2706,45 @@ export default {
 
 
       /*
-        Earliest games first.
+      -------------------------------------------------------
+      SORT BY START TIME
+      -------------------------------------------------------
       */
 
-      unique.sort(function(a,b){
+      unique.sort(
 
-        return (
+        function(a,b){
 
-          new Date(
-            a.commence_time
-          ) -
+          return (
+            new Date(
+              a.commence_time
+            ) -
 
-          new Date(
-            b.commence_time
-          )
+            new Date(
+              b.commence_time
+            )
+          );
 
-        );
+        }
 
-      });
+      );
 
+
+      /*
+      -------------------------------------------------------
+      RESPONSE
+      -------------------------------------------------------
+      */
 
       return new Response(
 
         JSON.stringify({
+
+          date:
+            nigeriaDate,
+
+          timezone:
+            "Africa/Lagos",
 
           leagues:
             basketballSports.length,
@@ -1431,6 +2755,8 @@ export default {
         }),
 
         {
+
+          status:200,
 
           headers:{
 
@@ -1453,7 +2779,9 @@ export default {
 
 
     /*
-      Main BetLord page.
+    ---------------------------------------------------------
+    MAIN BETLORD PAGE
+    ---------------------------------------------------------
     */
 
     return new Response(
@@ -1462,10 +2790,15 @@ export default {
 
       {
 
+        status:200,
+
         headers:{
 
           "Content-Type":
-            "text/html;charset=UTF-8"
+            "text/html;charset=UTF-8",
+
+          "Cache-Control":
+            "no-store"
 
         }
 
