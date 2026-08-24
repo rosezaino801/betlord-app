@@ -2,34 +2,40 @@ const API_URL = "https://api.the-odds-api.com";
 
 /*
 ===========================================================
- BETLORD — SMART BASKETBALL ODDS & MARKET ANALYSIS ENGINE
+ BETLORD — SMART BASKETBALL ODDS & PREDICTION ENGINE
 ===========================================================
 
-- Cloudflare Worker
-- Uses The Odds API
-- Keeps BETLORD_API_KEY private
-- Automatically discovers active basketball leagues
-- Loads today's games in Africa/Lagos timezone
-- Uses Over/Under totals markets
-- Compares bookmaker prices
-- Calculates normalized market probability
-- Measures bookmaker agreement
-- Measures line stability
-- Produces:
-    BET OVER
-    BET UNDER
-    NO BET
-- Never guarantees betting results
+ FEATURES
+ - Finds active basketball leagues automatically
+ - Fetches basketball odds from The Odds API
+ - Supports Over/Under totals
+ - Uses all returned bookmakers
+ - Removes bookmaker margin (vig)
+ - Calculates:
+      • Market probability
+      • Bookmaker agreement
+      • Line stability
+      • Bookmaker coverage
+      • Market edge
+      • Confidence
+ - Produces:
+      • BET OVER
+      • BET UNDER
+      • NO BET
+ - Uses Africa/Lagos timezone
+ - Keeps API key private in Cloudflare Worker
+ - Shows useful API errors instead of silently returning 0 games
 
+ IMPORTANT
+ This is a market-analysis system.
+ It does NOT guarantee betting results.
 ===========================================================
 */
 
 const HTML = `
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-
 <meta charset="UTF-8">
 
 <meta
@@ -53,41 +59,42 @@ body{
 }
 
 header{
-  padding:20px;
+  padding:24px 20px;
   background:#0b1728;
   display:flex;
   align-items:center;
-  gap:12px;
+  gap:16px;
   border-bottom:1px solid #1b2b40;
 }
 
 .logo{
-  width:56px;
-  height:56px;
-  border-radius:15px;
+  width:64px;
+  height:64px;
+  border-radius:18px;
   background:#19d37e;
   display:flex;
   align-items:center;
   justify-content:center;
-  font-size:30px;
+  font-size:36px;
   font-weight:bold;
   color:#06120c;
+  flex-shrink:0;
 }
 
 h1{
   margin:0;
-  font-size:25px;
+  font-size:30px;
 }
 
 header small{
   color:#9db0c5;
-  font-size:14px;
+  font-size:15px;
 }
 
 nav{
   display:flex;
   gap:10px;
-  padding:15px;
+  padding:16px;
   overflow-x:auto;
   background:#07111f;
   scrollbar-width:none;
@@ -99,12 +106,12 @@ nav::-webkit-scrollbar{
 
 nav button{
   border:0;
-  border-radius:14px;
-  padding:15px 22px;
+  border-radius:16px;
+  padding:17px 25px;
   background:#142338;
   color:white;
   white-space:nowrap;
-  font-size:16px;
+  font-size:17px;
   cursor:pointer;
 }
 
@@ -125,27 +132,28 @@ main{
     #10283c,
     #0b1728
   );
-  border-radius:20px;
-  padding:24px;
+  border-radius:22px;
+  padding:26px;
   margin-bottom:18px;
 }
 
 .hero h2{
-  margin-top:0;
-  font-size:30px;
+  margin:0 0 14px 0;
+  font-size:32px;
 }
 
 .hero p{
   color:#b4c3d4;
-  line-height:1.5;
+  line-height:1.55;
   font-size:17px;
+  margin-bottom:0;
 }
 
 .refresh{
   width:100%;
   border:0;
-  border-radius:14px;
-  padding:16px;
+  border-radius:16px;
+  padding:18px;
   background:#19d37e;
   color:#06120c;
   font-weight:bold;
@@ -161,11 +169,24 @@ main{
 .status{
   background:#102238;
   border:1px solid #1b2b40;
-  padding:15px;
-  border-radius:14px;
+  padding:16px;
+  border-radius:15px;
   margin-bottom:15px;
-  color:#9db0c5;
-  line-height:1.4;
+  color:#aebfd1;
+  line-height:1.5;
+}
+
+.status.success{
+  border-color:#1c7149;
+}
+
+.status.warning{
+  border-color:#7c6421;
+}
+
+.status.error{
+  border-color:#7a2937;
+  color:#ffb0ba;
 }
 
 .game{
@@ -195,7 +216,7 @@ main{
 
 .team{
   flex:1;
-  line-height:1.3;
+  line-height:1.35;
 }
 
 .vs{
@@ -233,14 +254,6 @@ main{
 
 .odd-value{
   font-size:17px;
-}
-
-.no-pick{
-  grid-column:1 / -1;
-  background:#15263a;
-  padding:14px;
-  border-radius:12px;
-  color:#9db0c5;
 }
 
 .prediction{
@@ -335,14 +348,14 @@ main{
 
 .loading{
   text-align:center;
-  padding:40px 20px;
+  padding:45px 20px;
   color:#9db0c5;
 }
 
 .error{
   background:#351820;
   color:#ff9ca8;
-  padding:16px;
+  padding:17px;
   border-radius:14px;
   line-height:1.5;
 }
@@ -350,9 +363,22 @@ main{
 .empty{
   background:#102238;
   color:#9db0c5;
-  padding:25px;
+  padding:28px;
   border-radius:15px;
   text-align:center;
+  line-height:1.5;
+}
+
+.debug{
+  margin-top:15px;
+  background:#0a1625;
+  border:1px solid #1b2b40;
+  border-radius:14px;
+  padding:15px;
+  color:#8498ad;
+  font-size:12px;
+  line-height:1.6;
+  overflow-wrap:anywhere;
 }
 
 footer{
@@ -370,7 +396,7 @@ footer{
   }
 
   .hero{
-    padding:21px;
+    padding:22px;
   }
 
   .hero h2{
@@ -381,6 +407,10 @@ footer{
     font-size:16px;
   }
 
+  .odds{
+    grid-template-columns:repeat(2,1fr);
+  }
+
   .metrics{
     grid-template-columns:repeat(3,1fr);
   }
@@ -388,7 +418,6 @@ footer{
 }
 
 </style>
-
 </head>
 
 <body>
@@ -451,15 +480,15 @@ footer{
   </h2>
 
   <p id="pageDescription">
-    All available basketball games with
-    intelligent Over/Under market analysis.
+    Basketball games with intelligent
+    Over/Under market analysis.
   </p>
 
 </section>
 
 <button
   class="refresh"
-  id="refreshButton"
+  onclick="loadBasketball()"
 >
   🔄 Refresh Basketball Odds
 </button>
@@ -520,8 +549,7 @@ function formatTime(value){
     return "";
   }
 
-  const date =
-    new Date(value);
+  const date = new Date(value);
 
   if(
     Number.isNaN(
@@ -639,9 +667,7 @@ function collectTotals(game){
       game.bookmakers
     )
   ){
-
     return candidates;
-
   }
 
   game.bookmakers.forEach(
@@ -652,9 +678,7 @@ function collectTotals(game){
           bookmaker.markets
         )
       ){
-
         return;
-
       }
 
       bookmaker.markets.forEach(
@@ -663,9 +687,7 @@ function collectTotals(game){
           if(
             market.key !== "totals"
           ){
-
             return;
-
           }
 
           if(
@@ -673,9 +695,7 @@ function collectTotals(game){
               market.outcomes
             )
           ){
-
             return;
-
           }
 
           const over =
@@ -685,7 +705,8 @@ function collectTotals(game){
                 return (
                   String(
                     outcome.name
-                  ).toLowerCase() === "over"
+                  ).toLowerCase() ===
+                  "over"
                 );
 
               }
@@ -698,7 +719,8 @@ function collectTotals(game){
                 return (
                   String(
                     outcome.name
-                  ).toLowerCase() === "under"
+                  ).toLowerCase() ===
+                  "under"
                 );
 
               }
@@ -708,9 +730,7 @@ function collectTotals(game){
             !over ||
             !under
           ){
-
             return;
-
           }
 
           const point =
@@ -739,28 +759,23 @@ function collectTotals(game){
             !Number.isFinite(overPrice) ||
             !Number.isFinite(underPrice)
           ){
-
             return;
-
           }
 
           if(
             Math.abs(
-              point - underPoint
+              point -
+              underPoint
             ) > 0.01
           ){
-
             return;
-
           }
 
           if(
             overPrice <= 1 ||
             underPrice <= 1
           ){
-
             return;
-
           }
 
           candidates.push({
@@ -812,9 +827,7 @@ function groupByLine(
       if(
         !groups[key]
       ){
-
         groups[key] = [];
-
       }
 
       groups[key].push(
@@ -841,9 +854,7 @@ function calculatePriceSpread(
     !group ||
     group.length < 2
   ){
-
     return 0;
-
   }
 
   const overPrices =
@@ -871,7 +882,7 @@ function calculatePriceSpread(
 
 
 /* =========================================================
-   FIND CONSENSUS LINE
+   CONSENSUS LINE
 ========================================================= */
 
 function chooseConsensusLine(
@@ -881,9 +892,7 @@ function chooseConsensusLine(
   if(
     candidates.length === 0
   ){
-
     return null;
-
   }
 
   const groups =
@@ -891,72 +900,70 @@ function chooseConsensusLine(
       candidates
     );
 
-  let bestGroup =
-    null;
+  let bestGroup = null;
 
-  Object.values(groups)
-    .forEach(
-      function(group){
+  Object.values(
+    groups
+  ).forEach(
+    function(group){
+
+      if(
+        !bestGroup
+      ){
+
+        bestGroup =
+          group;
+
+        return;
+
+      }
+
+      if(
+        group.length >
+        bestGroup.length
+      ){
+
+        bestGroup =
+          group;
+
+        return;
+
+      }
+
+      if(
+        group.length ===
+        bestGroup.length
+      ){
+
+        const spread =
+          calculatePriceSpread(
+            group
+          );
+
+        const bestSpread =
+          calculatePriceSpread(
+            bestGroup
+          );
 
         if(
-          !bestGroup
+          spread <
+          bestSpread
         ){
 
           bestGroup =
             group;
-
-          return;
-
-        }
-
-        if(
-          group.length >
-          bestGroup.length
-        ){
-
-          bestGroup =
-            group;
-
-          return;
-
-        }
-
-        if(
-          group.length ===
-          bestGroup.length
-        ){
-
-          const groupSpread =
-            calculatePriceSpread(
-              group
-            );
-
-          const bestSpread =
-            calculatePriceSpread(
-              bestGroup
-            );
-
-          if(
-            groupSpread <
-            bestSpread
-          ){
-
-            bestGroup =
-              group;
-
-          }
 
         }
 
       }
-    );
+
+    }
+  );
 
   if(
     !bestGroup
   ){
-
     return null;
-
   }
 
   return {
@@ -1000,7 +1007,7 @@ function chooseConsensusLine(
 
 
 /* =========================================================
-   NORMALIZED MARKET PROBABILITY
+   NORMALIZED PROBABILITY
 ========================================================= */
 
 function calculateProbability(
@@ -1012,9 +1019,7 @@ function calculateProbability(
     overPrice <= 1 ||
     underPrice <= 1
   ){
-
     return null;
-
   }
 
   const overRaw =
@@ -1030,18 +1035,18 @@ function calculateProbability(
   if(
     total <= 0
   ){
-
     return null;
-
   }
 
   return {
 
     over:
-      overRaw / total,
+      overRaw /
+      total,
 
     under:
-      underRaw / total
+      underRaw /
+      total
 
   };
 
@@ -1060,14 +1065,12 @@ function calculateAgreement(
   if(
     !candidates.length
   ){
-
     return 0;
-
   }
 
   let agreeing = 0;
 
-  let analysed = 0;
+  let valid = 0;
 
   candidates.forEach(
     function(item){
@@ -1081,58 +1084,39 @@ function calculateAgreement(
       if(
         !probabilities
       ){
-
         return;
-
       }
 
-      analysed++;
+      valid++;
 
-      let bookmakerPick =
-        "NONE";
-
-      if(
+      const bookmakerPick =
         probabilities.over >
         probabilities.under
-      ){
-
-        bookmakerPick =
-          "OVER";
-
-      }
-      else if(
-        probabilities.under >
-        probabilities.over
-      ){
-
-        bookmakerPick =
-          "UNDER";
-
-      }
+          ? "OVER"
+          : probabilities.under >
+            probabilities.over
+              ? "UNDER"
+              : "NONE";
 
       if(
         bookmakerPick ===
         pick
       ){
-
         agreeing++;
-
       }
 
     }
   );
 
   if(
-    analysed === 0
+    valid === 0
   ){
-
     return 0;
-
   }
 
   return (
     agreeing /
-    analysed
+    valid
   );
 
 }
@@ -1150,9 +1134,7 @@ function calculateLineStability(
   if(
     !candidates.length
   ){
-
     return 0;
-
   }
 
   const differences =
@@ -1175,41 +1157,31 @@ function calculateLineStability(
   if(
     averageDifference <= 0.1
   ){
-
     return 1;
-
   }
 
   if(
     averageDifference <= 0.25
   ){
-
     return 0.95;
-
   }
 
   if(
     averageDifference <= 0.5
   ){
-
     return 0.85;
-
   }
 
   if(
     averageDifference <= 1
   ){
-
     return 0.70;
-
   }
 
   if(
     averageDifference <= 1.5
   ){
-
     return 0.55;
-
   }
 
   return 0.40;
@@ -1218,7 +1190,7 @@ function calculateLineStability(
 
 
 /* =========================================================
-   SMART PREDICTION ENGINE
+   PREDICTION ENGINE
 ========================================================= */
 
 function buildPrediction(
@@ -1277,8 +1249,8 @@ function buildPrediction(
       ? "OVER"
       : probabilities.under >
         probabilities.over
-        ? "UNDER"
-        : "NONE";
+          ? "UNDER"
+          : "NONE";
 
   const probabilityEdge =
     Math.abs(
@@ -1306,39 +1278,27 @@ function buildPrediction(
     );
 
   /*
-  ---------------------------------------------------------
-  WEIGHTED MODEL
+    MODEL WEIGHT
 
-  Market direction      45%
-  Bookmaker agreement   25%
-  Line stability        15%
-  Bookmaker coverage    15%
-  ---------------------------------------------------------
+    Market edge:       45%
+    Agreement:         25%
+    Stability:         15%
+    Bookmaker coverage:15%
   */
 
   const rawScore =
-
     (
       probabilityEdge *
       0.45
-    )
-
-    +
-
+    ) +
     (
       agreement *
       0.25
-    )
-
-    +
-
+    ) +
     (
       stability *
       0.15
-    )
-
-    +
-
+    ) +
     (
       bookmakerScore *
       0.15
@@ -1350,11 +1310,6 @@ function buildPrediction(
       rawScore *
       50
     );
-
-  /*
-  Keep weak market differences
-  from producing fake high confidence.
-  */
 
   if(
     probabilityEdge < 0.02
@@ -1404,8 +1359,7 @@ function buildPrediction(
   let decision =
     "NO BET";
 
-  let reason =
-    "";
+  let reason = "";
 
   if(
     consensus.bookmakers < 2
@@ -1415,16 +1369,6 @@ function buildPrediction(
       "Not enough bookmakers are offering the same total line.";
 
   }
-
-  else if(
-    pick === "NONE"
-  ){
-
-    reason =
-      "The Over/Under market is perfectly balanced.";
-
-  }
-
   else if(
     probabilityEdge < 0.025
   ){
@@ -1433,7 +1377,6 @@ function buildPrediction(
       "The Over/Under market is extremely balanced.";
 
   }
-
   else if(
     agreement < 0.55
   ){
@@ -1442,7 +1385,6 @@ function buildPrediction(
       "Bookmakers are not showing enough directional agreement.";
 
   }
-
   else if(
     stability < 0.55
   ){
@@ -1451,7 +1393,6 @@ function buildPrediction(
       "The available total lines are too spread out.";
 
   }
-
   else if(
     confidence < 55
   ){
@@ -1460,7 +1401,6 @@ function buildPrediction(
       "The market signal is too weak for a confident selection.";
 
   }
-
   else {
 
     decision =
@@ -1517,7 +1457,7 @@ function buildPrediction(
 
 
 /* =========================================================
-   EXPLANATION
+   REASON
 ========================================================= */
 
 function buildReason(
@@ -1539,36 +1479,27 @@ function buildReason(
 
   const agreementText =
     Math.round(
-      agreement * 100
+      agreement *
+      100
     );
 
   const stabilityText =
     Math.round(
-      stability * 100
+      stability *
+      100
     );
 
   return (
-
     pick +
-
     " has the stronger market probability at " +
-
     probabilityText +
-
     "%. " +
-
     agreementText +
-
     "% of analysed bookmaker prices support the same direction, with " +
-
     stabilityText +
-
     "% line stability across " +
-
     bookmakers +
-
     " bookmaker(s)."
-
   );
 
 }
@@ -1593,11 +1524,8 @@ function renderGames(
   ){
 
     container.innerHTML =
-
       '<div class="empty">' +
-
       'No basketball games with available Over/Under markets were found for today.' +
-
       '</div>';
 
     return;
@@ -1605,7 +1533,6 @@ function renderGames(
   }
 
   container.innerHTML =
-
     games.map(
       function(game){
 
@@ -1614,8 +1541,7 @@ function renderGames(
             game
           );
 
-        let oddsHTML =
-          "";
+        let oddsHTML = "";
 
         if(
           prediction.available
@@ -1636,9 +1562,7 @@ function renderGames(
                 ' @ ' +
 
                 escapeHTML(
-                  Number(
-                    prediction.overPrice
-                  ).toFixed(2)
+                  prediction.overPrice.toFixed(2)
                 ) +
 
               '</div>' +
@@ -1658,9 +1582,7 @@ function renderGames(
                 ' @ ' +
 
                 escapeHTML(
-                  Number(
-                    prediction.underPrice
-                  ).toFixed(2)
+                  prediction.underPrice.toFixed(2)
                 ) +
 
               '</div>' +
@@ -1668,21 +1590,19 @@ function renderGames(
             '</div>';
 
         }
-
         else {
 
           oddsHTML =
-
-            '<div class="no-pick">' +
-
-              'Over/Under market currently unavailable.' +
-
+            '<div class="odd">' +
+              '<span>MARKET</span>' +
+              '<div class="odd-value">' +
+                'Over/Under unavailable' +
+              '</div>' +
             '</div>';
 
         }
 
-        let predictionHTML =
-          "";
+        let predictionHTML = "";
 
         if(
           prediction.available
@@ -1698,15 +1618,11 @@ function renderGames(
               '<div class="prediction no-bet">' +
 
                 '<div class="no-bet-title">' +
-
                   '⚠️ BETLORD SIGNAL' +
-
                 '</div>' +
 
                 '<div class="no-bet-pick">' +
-
                   'NO BET' +
-
                 '</div>' +
 
                 '<div class="confidence">' +
@@ -1714,16 +1630,22 @@ function renderGames(
                   'Over: ' +
 
                   Math.round(
-                    prediction.overProbability * 100
+                    prediction.overProbability *
+                    100
                   ) +
 
                   '% • Under: ' +
 
                   Math.round(
-                    prediction.underProbability * 100
+                    prediction.underProbability *
+                    100
                   ) +
 
-                  '%' +
+                  '% • ' +
+
+                  prediction.bookmakers +
+
+                  ' bookmaker(s)' +
 
                 '</div>' +
 
@@ -1740,33 +1662,14 @@ function renderGames(
                   '<div class="metric">' +
 
                     '<span class="metric-label">' +
-
-                      'BOOKS' +
-
-                    '</span>' +
-
-                    '<span class="metric-value">' +
-
-                      prediction.bookmakers +
-
-                    '</span>' +
-
-                  '</div>' +
-
-                  '<div class="metric">' +
-
-                    '<span class="metric-label">' +
-
                       'EDGE' +
-
                     '</span>' +
 
                     '<span class="metric-value">' +
 
                       (
-
-                        prediction.probabilityEdge * 100
-
+                        prediction.probabilityEdge *
+                        100
                       ).toFixed(1) +
 
                       '%' +
@@ -1778,15 +1681,33 @@ function renderGames(
                   '<div class="metric">' +
 
                     '<span class="metric-label">' +
-
-                      'STABILITY' +
-
+                      'AGREEMENT' +
                     '</span>' +
 
                     '<span class="metric-value">' +
 
                       Math.round(
-                        prediction.stability * 100
+                        prediction.agreement *
+                        100
+                      ) +
+
+                      '%' +
+
+                    '</span>' +
+
+                  '</div>' +
+
+                  '<div class="metric">' +
+
+                    '<span class="metric-label">' +
+                      'STABILITY' +
+                    '</span>' +
+
+                    '<span class="metric-value">' +
+
+                      Math.round(
+                        prediction.stability *
+                        100
                       ) +
 
                       '%' +
@@ -1800,7 +1721,6 @@ function renderGames(
               '</div>';
 
           }
-
           else {
 
             predictionHTML =
@@ -1808,9 +1728,7 @@ function renderGames(
               '<div class="prediction bet">' +
 
                 '<div class="prediction-title">' +
-
                   '🤖 BETLORD PREDICTION' +
-
                 '</div>' +
 
                 '<div class="pick">' +
@@ -1856,17 +1774,14 @@ function renderGames(
                   '<div class="metric">' +
 
                     '<span class="metric-label">' +
-
                       'EDGE' +
-
                     '</span>' +
 
                     '<span class="metric-value">' +
 
                       (
-
-                        prediction.probabilityEdge * 100
-
+                        prediction.probabilityEdge *
+                        100
                       ).toFixed(1) +
 
                       '%' +
@@ -1878,15 +1793,14 @@ function renderGames(
                   '<div class="metric">' +
 
                     '<span class="metric-label">' +
-
                       'AGREEMENT' +
-
                     '</span>' +
 
                     '<span class="metric-value">' +
 
                       Math.round(
-                        prediction.agreement * 100
+                        prediction.agreement *
+                        100
                       ) +
 
                       '%' +
@@ -1898,15 +1812,14 @@ function renderGames(
                   '<div class="metric">' +
 
                     '<span class="metric-label">' +
-
                       'STABILITY' +
-
                     '</span>' +
 
                     '<span class="metric-value">' +
 
                       Math.round(
-                        prediction.stability * 100
+                        prediction.stability *
+                        100
                       ) +
 
                       '%' +
@@ -1922,7 +1835,6 @@ function renderGames(
           }
 
         }
-
         else {
 
           predictionHTML =
@@ -1930,21 +1842,15 @@ function renderGames(
             '<div class="prediction no-bet">' +
 
               '<div class="no-bet-title">' +
-
                 '⚠️ BETLORD SIGNAL' +
-
               '</div>' +
 
               '<div class="no-bet-pick">' +
-
                 'NO BET' +
-
               '</div>' +
 
               '<div class="reason">' +
-
                 'There is not enough reliable Over/Under market data for this game.' +
-
               '</div>' +
 
             '</div>';
@@ -1958,13 +1864,9 @@ function renderGames(
             '<div class="league">' +
 
               escapeHTML(
-
                 game.sport_title ||
-
                 game.sport_key ||
-
                 "Basketball"
-
               ) +
 
             '</div>' +
@@ -1974,29 +1876,21 @@ function renderGames(
               '<div class="team">' +
 
                 escapeHTML(
-
                   game.away_team ||
-
                   "Away"
-
                 ) +
 
               '</div>' +
 
               '<div class="vs">' +
-
                 'VS' +
-
               '</div>' +
 
               '<div class="team" style="text-align:right">' +
 
                 escapeHTML(
-
                   game.home_team ||
-
                   "Home"
-
                 ) +
 
               '</div>' +
@@ -2008,11 +1902,9 @@ function renderGames(
               '🕒 ' +
 
               escapeHTML(
-
                 formatTime(
                   game.commence_time
                 )
-
               ) +
 
             '</div>' +
@@ -2052,15 +1944,15 @@ async function loadBasketball(){
     );
 
   container.innerHTML =
-
     '<div class="loading">' +
-
     '🏀 Finding today\\'s basketball games...' +
-
     '</div>';
 
+  status.className =
+    "status";
+
   status.textContent =
-    "Searching available basketball leagues...";
+    "Searching active basketball leagues...";
 
   try{
 
@@ -2077,28 +1969,8 @@ async function loadBasketball(){
         }
       );
 
-    const text =
-      await response.text();
-
-    let data;
-
-    try{
-
-      data =
-        JSON.parse(
-          text
-        );
-
-    }
-
-    catch(error){
-
-      throw new Error(
-        text ||
-        "The server returned an invalid response."
-      );
-
-    }
+    const data =
+      await response.json();
 
     if(
       !response.ok
@@ -2119,38 +1991,82 @@ async function loadBasketball(){
     ){
 
       throw new Error(
-        "Invalid basketball response."
+        "Invalid response received from BetLord server."
       );
 
     }
 
-    status.textContent =
+    if(
+      data.games.length > 0
+    ){
 
-      "Found " +
+      status.className =
+        "status success";
 
-      data.games.length +
+      status.textContent =
+        "Found " +
+        data.games.length +
+        " basketball game(s) across " +
+        data.leagues +
+        " active league(s).";
 
-      " basketball game(s) across " +
+    }
+    else {
 
-      (
-        data.leagues ||
-        0
-      ) +
+      status.className =
+        "status warning";
 
-      " active basketball league(s).";
+      status.textContent =
+        "No basketball games with usable Over/Under markets were found today.";
+
+    }
 
     renderGames(
       data.games
     );
 
-  }
+    if(
+      Array.isArray(
+        data.errors
+      ) &&
+      data.errors.length > 0
+    ){
 
+      const debug =
+        document.createElement(
+          "div"
+        );
+
+      debug.className =
+        "debug";
+
+      debug.innerHTML =
+        "<strong>API diagnostics:</strong><br>" +
+        data.errors
+          .map(
+            function(error){
+              return escapeHTML(
+                error
+              );
+            }
+          )
+          .join("<br>");
+
+      container.appendChild(
+        debug
+      );
+
+    }
+
+  }
   catch(error){
 
     console.error(
-      "BetLord error:",
       error
     );
+
+    status.className =
+      "status error";
 
     status.textContent =
       "Basketball data could not be loaded.";
@@ -2159,13 +2075,12 @@ async function loadBasketball(){
 
       '<div class="error">' +
 
-        '<strong>Unable to load basketball odds.</strong>' +
+        '<strong>BetLord could not load the basketball data.</strong>' +
 
         '<br><br>' +
 
         escapeHTML(
-          error.message ||
-          "Unknown error."
+          error.message
         ) +
 
       '</div>';
@@ -2228,7 +2143,7 @@ document
           "pageDescription"
         )
         .textContent =
-        "All available basketball games with intelligent Over/Under market analysis.";
+        "Basketball games with intelligent Over/Under market analysis.";
 
       loadBasketball();
 
@@ -2260,7 +2175,7 @@ document
           "pageDescription"
         )
         .textContent =
-        "All available basketball games with intelligent Over/Under market analysis.";
+        "Basketball games with intelligent Over/Under market analysis.";
 
       loadBasketball();
 
@@ -2281,7 +2196,7 @@ document
       );
 
       alert(
-        "Football analysis will be connected next."
+        "Football section will be connected next."
       );
 
     }
@@ -2301,22 +2216,8 @@ document
       );
 
       alert(
-        "Popular games will be connected next."
+        "Popular section will be connected next."
       );
-
-    }
-  );
-
-
-document
-  .getElementById(
-    "refreshButton"
-  )
-  .addEventListener(
-    "click",
-    function(){
-
-      loadBasketball();
 
     }
   );
@@ -2331,51 +2232,177 @@ loadBasketball();
 </script>
 
 </body>
-
 </html>
 `;
 
 
 /* =========================================================
-   CORS RESPONSE
+   HELPER — GET NIGERIA DATE
 ========================================================= */
 
-function jsonResponse(
-  data,
-  status = 200
-){
+function getNigeriaDate(){
 
-  return new Response(
-    JSON.stringify(
-      data
-    ),
+  return new Intl.DateTimeFormat(
+    "en-CA",
     {
-      status,
-
-      headers:{
-        "Content-Type":
-          "application/json;charset=UTF-8",
-
-        "Cache-Control":
-          "no-store",
-
-        "Access-Control-Allow-Origin":
-          "*",
-
-        "Access-Control-Allow-Methods":
-          "GET,OPTIONS",
-
-        "Access-Control-Allow-Headers":
-          "Content-Type"
-      }
+      timeZone:"Africa/Lagos",
+      year:"numeric",
+      month:"2-digit",
+      day:"2-digit"
     }
+  ).format(
+    new Date()
   );
 
 }
 
 
 /* =========================================================
-   CLOUDFLARE WORKER
+   HELPER — CHECK IF GAME IS TODAY IN LAGOS
+========================================================= */
+
+function isTodayInLagos(
+  commenceTime
+){
+
+  if(!commenceTime){
+    return false;
+  }
+
+  const gameDate =
+    new Intl.DateTimeFormat(
+      "en-CA",
+      {
+        timeZone:"Africa/Lagos",
+        year:"numeric",
+        month:"2-digit",
+        day:"2-digit"
+      }
+    ).format(
+      new Date(
+        commenceTime
+      )
+    );
+
+  return (
+    gameDate ===
+    getNigeriaDate()
+  );
+
+}
+
+
+/* =========================================================
+   HELPER — API REQUEST
+========================================================= */
+
+async function getOddsForSport(
+  sport,
+  apiKey
+){
+
+  const oddsUrl =
+    API_URL +
+    "/v4/sports/" +
+    encodeURIComponent(
+      sport.key
+    ) +
+    "/odds/" +
+    "?regions=uk,eu,us,au" +
+    "&markets=totals" +
+    "&oddsFormat=decimal" +
+    "&apiKey=" +
+    encodeURIComponent(
+      apiKey
+    );
+
+  const response =
+    await fetch(
+      oddsUrl,
+      {
+        method:"GET",
+        headers:{
+          "Accept":
+            "application/json"
+        }
+      }
+    );
+
+  const text =
+    await response.text();
+
+  let data = null;
+
+  try{
+
+    data =
+      JSON.parse(
+        text
+      );
+
+  }
+  catch{
+
+    data = null;
+
+  }
+
+  if(
+    !response.ok
+  ){
+
+    let message =
+      "HTTP " +
+      response.status;
+
+    if(
+      data &&
+      data.message
+    ){
+
+      message +=
+        " — " +
+        data.message;
+
+    }
+    else if(
+      text
+    ){
+
+      message +=
+        " — " +
+        text.slice(
+          0,
+          300
+        );
+
+    }
+
+    throw new Error(
+      message
+    );
+
+  }
+
+  if(
+    !Array.isArray(
+      data
+    )
+  ){
+
+    throw new Error(
+      "The Odds API returned an unexpected response."
+    );
+
+  }
+
+  return data;
+
+}
+
+
+/* =========================================================
+   SERVER
 ========================================================= */
 
 export default {
@@ -2390,67 +2417,9 @@ export default {
         request.url
       );
 
-    /* -----------------------------------------------------
-       OPTIONS
-    ----------------------------------------------------- */
-
-    if(
-      request.method ===
-      "OPTIONS"
-    ){
-
-      return new Response(
-        null,
-        {
-          status:204,
-
-          headers:{
-            "Access-Control-Allow-Origin":
-              "*",
-
-            "Access-Control-Allow-Methods":
-              "GET,OPTIONS",
-
-            "Access-Control-Allow-Headers":
-              "Content-Type",
-
-            "Access-Control-Max-Age":
-              "86400"
-          }
-        }
-      );
-
-    }
-
-
-    /* -----------------------------------------------------
-       ONLY GET REQUESTS
-    ----------------------------------------------------- */
-
-    if(
-      request.method !==
-      "GET"
-    ){
-
-      return jsonResponse(
-        {
-          error:
-            "Method not allowed."
-        },
-        405
-      );
-
-    }
-
-
-    /* -----------------------------------------------------
-       BETLORD SECRET API KEY
-    ----------------------------------------------------- */
-
     const apiKey =
       env.BETLORD_API_KEY ||
       "";
-
 
     /* =====================================================
        BASKETBALL API
@@ -2461,487 +2430,404 @@ export default {
       "/api/basketball"
     ){
 
-      if(
-        !apiKey
-      ){
+      if(!apiKey){
 
-        return jsonResponse(
-          {
+        return new Response(
+
+          JSON.stringify({
+
             error:
-              "BETLORD_API_KEY is missing from the Cloudflare Worker secret."
-          },
-          500
+              "BETLORD_API_KEY is missing from the Cloudflare Worker environment variables."
+
+          }),
+
+          {
+            status:500,
+
+            headers:{
+              "Content-Type":
+                "application/json",
+
+              "Cache-Control":
+                "no-store",
+
+              "Access-Control-Allow-Origin":
+                "*"
+            }
+
+          }
+
         );
 
       }
 
 
+      /* ===================================================
+         GET ACTIVE SPORTS
+         /sports DOES NOT consume odds quota
+      =================================================== */
+
+      let sports;
+
       try{
-
-        /* -------------------------------------------------
-           GET ALL SPORTS
-
-           /sports does NOT consume odds quota.
-        ------------------------------------------------- */
 
         const sportsResponse =
           await fetch(
+
             API_URL +
-            "/v4/sports/?apiKey=" +
+            "/v4/sports/" +
+            "?apiKey=" +
             encodeURIComponent(
               apiKey
             ),
+
             {
-              method:"GET",
               headers:{
                 "Accept":
                   "application/json"
               }
             }
-          );
 
+          );
 
         const sportsText =
           await sportsResponse.text();
 
-
-        let sports;
-
+        let sportsData = null;
 
         try{
 
-          sports =
+          sportsData =
             JSON.parse(
               sportsText
             );
 
         }
+        catch{
 
-        catch(error){
-
-          return jsonResponse(
-            {
-              error:
-                "The Odds API returned an invalid sports response.",
-              details:
-                sportsText
-            },
-            502
-          );
+          sportsData =
+            null;
 
         }
-
 
         if(
           !sportsResponse.ok
         ){
 
-          return jsonResponse(
-            {
+          return new Response(
+
+            JSON.stringify({
+
               error:
-                "The Odds API rejected the sports request.",
+                (
+                  sportsData &&
+                  sportsData.message
+                ) ||
+                "The Odds API sports request failed.",
+
+              status:
+                sportsResponse.status
+
+            }),
+
+            {
               status:
                 sportsResponse.status,
-              details:
-                sports
-            },
-            sportsResponse.status
-          );
 
-        }
+              headers:{
+                "Content-Type":
+                  "application/json",
 
+                "Cache-Control":
+                  "no-store",
 
-        if(
-          !Array.isArray(
-            sports
-          )
-        ){
-
-          return jsonResponse(
-            {
-              error:
-                "Invalid sports data received from The Odds API."
-            },
-            502
-          );
-
-        }
-
-
-        /* -------------------------------------------------
-           FIND ACTIVE BASKETBALL SPORTS
-        ------------------------------------------------- */
-
-        const basketballSports =
-          sports.filter(
-            function(sport){
-
-              if(
-                !sport
-              ){
-
-                return false;
-
+                "Access-Control-Allow-Origin":
+                  "*"
               }
 
-              const group =
-                String(
-                  sport.group ||
-                  ""
-                ).toLowerCase();
+            }
+
+          );
+
+        }
+
+        sports =
+          sportsData;
+
+      }
+      catch(error){
+
+        return new Response(
+
+          JSON.stringify({
+
+            error:
+              "Could not connect to The Odds API: " +
+              error.message
+
+          }),
+
+          {
+            status:502,
+
+            headers:{
+              "Content-Type":
+                "application/json",
+
+              "Cache-Control":
+                "no-store",
+
+              "Access-Control-Allow-Origin":
+                "*"
+            }
+
+          }
+
+        );
+
+      }
 
 
-              return (
+      if(
+        !Array.isArray(
+          sports
+        )
+      ){
 
-                sport.active === true &&
+        return new Response(
 
+          JSON.stringify({
+
+            error:
+              "The Odds API returned an invalid sports list."
+
+          }),
+
+          {
+            status:502,
+
+            headers:{
+              "Content-Type":
+                "application/json",
+
+              "Cache-Control":
+                "no-store",
+
+              "Access-Control-Allow-Origin":
+                "*"
+            }
+
+          }
+
+        );
+
+      }
+
+
+      /* ===================================================
+         FIND ACTIVE BASKETBALL SPORTS
+      =================================================== */
+
+      const basketballSports =
+        sports.filter(
+          function(sport){
+
+            if(!sport){
+              return false;
+            }
+
+            const group =
+              String(
+                sport.group ||
+                ""
+              ).toLowerCase();
+
+            return (
+              sport.active === true &&
+              (
+                group ===
+                  "basketball" ||
                 group.includes(
                   "basketball"
                 )
-
-              );
-
-            }
-          );
-
-
-        /* -------------------------------------------------
-           TODAY IN AFRICA/LAGOS
-        ------------------------------------------------- */
-
-        const now =
-          new Date();
-
-
-        const nigeriaDate =
-          new Intl.DateTimeFormat(
-            "en-CA",
-            {
-              timeZone:
-                "Africa/Lagos",
-
-              year:
-                "numeric",
-
-              month:
-                "2-digit",
-
-              day:
-                "2-digit"
-            }
-          ).format(
-            now
-          );
-
-
-        /*
-        Nigeria is UTC+1.
-
-        Start:
-        Nigeria midnight.
-
-        End:
-        Next Nigeria midnight.
-        */
-
-        const dayStart =
-          new Date(
-            nigeriaDate +
-            "T00:00:00+01:00"
-          );
-
-
-        const nextDay =
-          new Date(
-            dayStart.getTime() +
-
-            (
-              24 *
-              60 *
-              60 *
-              1000
-            )
-
-          );
-
-
-        const commenceFrom =
-          dayStart.toISOString();
-
-
-        const commenceTo =
-          nextDay.toISOString();
-
-
-        /* -------------------------------------------------
-           FETCH BASKETBALL LEAGUES
-
-           IMPORTANT:
-           Only totals are requested because BetLord's
-           current engine analyses Over/Under totals.
-
-           This avoids unnecessarily requesting h2h/spreads.
-        ------------------------------------------------- */
-
-        const requests =
-          basketballSports.map(
-            async function(sport){
-
-              const oddsUrl =
-
-                API_URL +
-
-                "/v4/sports/" +
-
-                encodeURIComponent(
-                  sport.key
-                ) +
-
-                "/odds" +
-
-                "?regions=uk,eu,us,au" +
-
-                "&markets=totals" +
-
-                "&oddsFormat=decimal" +
-
-                "&commenceTimeFrom=" +
-
-                encodeURIComponent(
-                  commenceFrom
-                ) +
-
-                "&commenceTimeTo=" +
-
-                encodeURIComponent(
-                  commenceTo
-                ) +
-
-                "&apiKey=" +
-
-                encodeURIComponent(
-                  apiKey
-                );
-
-
-              try{
-
-                const response =
-                  await fetch(
-                    oddsUrl,
-                    {
-                      method:"GET",
-
-                      headers:{
-                        "Accept":
-                          "application/json"
-                      }
-                    }
-                  );
-
-
-                const text =
-                  await response.text();
-
-
-                if(
-                  !response.ok
-                ){
-
-                  console.error(
-                    "Odds request failed:",
-                    sport.key,
-                    response.status,
-                    text
-                  );
-
-                  return [];
-
-                }
-
-
-                let games;
-
-
-                try{
-
-                  games =
-                    JSON.parse(
-                      text
-                    );
-
-                }
-
-                catch(error){
-
-                  console.error(
-                    "Invalid JSON:",
-                    sport.key
-                  );
-
-                  return [];
-
-                }
-
-
-                if(
-                  !Array.isArray(
-                    games
-                  )
-                ){
-
-                  return [];
-
-                }
-
-
-                return games.map(
-                  function(game){
-
-                    return {
-
-                      ...game,
-
-                      sport_title:
-                        game.sport_title ||
-                        sport.title ||
-                        sport.key
-
-                    };
-
-                  }
-                );
-
-              }
-
-              catch(error){
-
-                console.error(
-                  "Failed basketball league:",
-                  sport.key,
-                  error
-                );
-
-                return [];
-
-              }
-
-            }
-          );
-
-
-        const results =
-          await Promise.all(
-            requests
-          );
-
-
-        /* -------------------------------------------------
-           COMBINE ALL GAMES
-        ------------------------------------------------- */
-
-        const games =
-          results
-            .flat()
-            .filter(
-              Boolean
-            );
-
-
-        /* -------------------------------------------------
-           REMOVE DUPLICATES
-        ------------------------------------------------- */
-
-        const unique =
-          Array.from(
-
-            new Map(
-
-              games.map(
-                function(game){
-
-                  return [
-                    game.id,
-                    game
-                  ];
-
-                }
               )
-
-            ).values()
-
-          );
-
-
-        /* -------------------------------------------------
-           SORT BY START TIME
-        ------------------------------------------------- */
-
-        unique.sort(
-          function(a,b){
-
-            return (
-
-              new Date(
-                a.commence_time
-              ) -
-
-              new Date(
-                b.commence_time
-              )
-
             );
 
           }
         );
 
 
-        /* -------------------------------------------------
-           RETURN DATA
-        ------------------------------------------------- */
+      /* ===================================================
+         FETCH ODDS
+      =================================================== */
 
-        return jsonResponse(
-          {
+      const games = [];
 
-            date:
-              nigeriaDate,
+      const errors = [];
 
-            timezone:
-              "Africa/Lagos",
 
-            leagues:
-              basketballSports.length,
+      for(
+        const sport
+        of basketballSports
+      ){
 
-            games:
-              unique
+        try{
 
-          },
-          200
-        );
+          const sportGames =
+            await getOddsForSport(
+              sport,
+              apiKey
+            );
+
+          if(
+            Array.isArray(
+              sportGames
+            )
+          ){
+
+            sportGames.forEach(
+              function(game){
+
+                if(
+                  !game ||
+                  !game.id
+                ){
+                  return;
+                }
+
+                /*
+                 Only keep games occurring
+                 TODAY in Africa/Lagos.
+                */
+
+                if(
+                  !isTodayInLagos(
+                    game.commence_time
+                  )
+                ){
+
+                  return;
+
+                }
+
+                games.push({
+
+                  ...game,
+
+                  sport_title:
+                    game.sport_title ||
+                    sport.title ||
+                    sport.key
+
+                });
+
+              }
+            );
+
+          }
+
+        }
+        catch(error){
+
+          errors.push(
+            sport.key +
+            ": " +
+            error.message
+          );
+
+        }
 
       }
 
-      catch(error){
 
-        console.error(
-          "Basketball endpoint error:",
-          error
+      /* ===================================================
+         REMOVE DUPLICATES
+      =================================================== */
+
+      const unique =
+        Array.from(
+
+          new Map(
+
+            games.map(
+              function(game){
+
+                return [
+                  game.id,
+                  game
+                ];
+
+              }
+            )
+
+          ).values()
+
         );
 
 
-        return jsonResponse(
-          {
-            error:
-              "BetLord could not retrieve basketball data.",
+      /* ===================================================
+         SORT BY START TIME
+      =================================================== */
 
-            details:
-              error.message ||
-              "Unknown server error."
-          },
-          500
-        );
+      unique.sort(
+        function(a,b){
 
-      }
+          return (
+            new Date(
+              a.commence_time
+            ) -
+            new Date(
+              b.commence_time
+            )
+          );
+
+        }
+      );
+
+
+      /* ===================================================
+         RESPONSE
+      =================================================== */
+
+      return new Response(
+
+        JSON.stringify({
+
+          date:
+            getNigeriaDate(),
+
+          timezone:
+            "Africa/Lagos",
+
+          leagues:
+            basketballSports.length,
+
+          games:
+            unique,
+
+          errors
+
+        }),
+
+        {
+          status:200,
+
+          headers:{
+
+            "Content-Type":
+              "application/json",
+
+            "Cache-Control":
+              "no-store",
+
+            "Access-Control-Allow-Origin":
+              "*"
+
+          }
+
+        }
+
+      );
 
     }
 
@@ -2951,18 +2837,24 @@ export default {
     ===================================================== */
 
     return new Response(
+
       HTML,
+
       {
         status:200,
 
         headers:{
+
           "Content-Type":
             "text/html;charset=UTF-8",
 
           "Cache-Control":
             "no-store"
+
         }
+
       }
+
     );
 
   }
